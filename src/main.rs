@@ -21,6 +21,7 @@ fn main() -> Result<()> {
         }
         Command::CpuDump { target, snapshot } => cpu_dump(&target, &snapshot),
         Command::CpuRestore { snapshot } => cpu_restore(&snapshot),
+        Command::SnapshotCheck { snapshot } => snapshot_check(&snapshot),
         Command::CudaState { pid } => cuda_state(pid),
         Command::CudaRoundtrip {
             pid,
@@ -138,6 +139,7 @@ fn freeze(
 fn summon(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
     let directory = PathBuf::from(snapshot_directory);
     let manifest = snapshot::read(&directory)?;
+    snapshot::verify(&directory, &manifest)?;
     snapshot::require_cuda_kind(&manifest)?;
     criu::restore(&directory)?;
     let restored_pid: i32 = fs::read_to_string(directory.join("restored.pid"))?
@@ -191,6 +193,7 @@ fn cpu_dump(target: &str, snapshot_directory: &str) -> Result<()> {
 fn cpu_restore(snapshot_directory: &str) -> Result<()> {
     let directory = PathBuf::from(snapshot_directory);
     let manifest = snapshot::read(&directory)?;
+    snapshot::verify(&directory, &manifest)?;
     criu::restore(&directory)?;
     let restored_pid = fs::read_to_string(directory.join("restored.pid"))
         .context("CRIU restore succeeded but restored.pid was not written")?;
@@ -199,6 +202,20 @@ fn cpu_restore(snapshot_directory: &str) -> Result<()> {
         manifest.process_name,
         manifest.captured_pid,
         restored_pid.trim()
+    );
+    Ok(())
+}
+
+fn snapshot_check(snapshot_directory: &str) -> Result<()> {
+    let directory = PathBuf::from(snapshot_directory);
+    let manifest = snapshot::read(&directory)?;
+    snapshot::verify(&directory, &manifest)?;
+    println!(
+        "snapshot compatible: kind={} schema={} files={} host={}",
+        manifest.kind,
+        manifest.schema_version,
+        manifest.files.len(),
+        manifest.host.hostname
     );
     Ok(())
 }

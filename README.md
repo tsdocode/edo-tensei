@@ -33,6 +33,7 @@ edo doctor --json
 edo run --name <name> -- <command> [args...]
 edo cpu-dump <name-or-pid> <snapshot-dir>
 edo cpu-restore <snapshot-dir>
+edo snapshot-check <snapshot-dir>
 edo freeze <name-or-pid> <snapshot-dir>
 edo summon <snapshot-dir>
 ```
@@ -100,3 +101,18 @@ sudo target/debug/edo cpu-restore /tmp/edo-snapshot
 ```
 
 See [the v0.1 milestone report](V0.1-MILESTONE.md) and the [GPU model demo](examples/gpu-model-snapshot/README.md) for scope, limitations, and reproduction commands.
+
+## Snapshot safety
+
+Snapshot manifests use schema version 2 and record the Edo version, source
+host, kernel, architecture, CRIU version, available GPU identity/capacity,
+process identity, restore requirements, and SHA-256 checksums for CRIU image
+files. `edo cpu-restore` and `edo summon` validate this metadata and the image
+checksums before invoking CRIU. `edo snapshot-check <snapshot-dir>` performs
+the same non-mutating validation.
+
+Snapshots are restricted to mode `0700`, and manifests to `0600`. Snapshot
+directories contain process memory and may contain credentials or other
+secrets; store them as sensitive data and remove them securely when no longer
+needed. v0.1 uses strict same-host compatibility and does not provide
+encryption-at-rest or cross-GPU migration.

@@ -15,8 +15,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
-

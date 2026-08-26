@@ -11,6 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_ID = os.environ.get("EDO_HF_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 DTYPE = torch.float16
+STARTUP_MARKER = os.environ.get("EDO_STARTUP_MARKER")
 verify_requested = True
 
 
@@ -39,6 +40,9 @@ def main():
     with torch.inference_mode():
         output = model.generate(**tokens, max_new_tokens=16, do_sample=False)
     torch.cuda.synchronize()
+    if STARTUP_MARKER:
+        with open(STARTUP_MARKER, "a", encoding="utf-8") as marker:
+            marker.write("model-initialized\n")
     warmup_text = tokenizer.decode(output[0], skip_special_tokens=True)
     checksum = model_checksum(model)
     print(f"model-ready pid={os.getpid()} model={MODEL_ID} device={torch.cuda.get_device_name()} parameters={sum(p.numel() for p in model.parameters())} startup_seconds={time.monotonic() - started:.3f}", flush=True)

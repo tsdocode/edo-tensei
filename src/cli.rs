@@ -29,6 +29,8 @@ pub enum Command {
     CpuDump { target: String, snapshot: String },
     /// Restore a CPU-only CRIU snapshot.
     CpuRestore { snapshot: String },
+    /// Validate snapshot compatibility, permissions, and image checksums.
+    SnapshotCheck { snapshot: String },
     /// Query the CUDA checkpoint state of a process without changing it.
     CudaState { pid: i32 },
     /// Run CUDA lock, checkpoint, restore, and unlock on a native CUDA process.

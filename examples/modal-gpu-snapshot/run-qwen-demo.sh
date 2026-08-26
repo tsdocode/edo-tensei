@@ -9,6 +9,7 @@ name="edo-modal-qwen-$$"
 parent=$(mktemp -d /tmp/edo-modal-qwen-demo.XXXXXX)
 snapshot="$parent/snapshot"
 log="$parent/model.log"
+startup_marker="$parent/startup.marker"
 
 cleanup() {
     if [ -f "$snapshot/restored.pid" ]; then sudo kill "$(sudo cat "$snapshot/restored.pid")" 2>/dev/null || true; fi
@@ -18,7 +19,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$repo_root"
-"$edo" run --name "$name" -- setsid env EDO_HF_MODEL="$model" "$python_bin" examples/modal-gpu-snapshot/qwen_gpu_fixture.py >"$log" 2>&1
+"$edo" run --name "$name" -- setsid env EDO_HF_MODEL="$model" EDO_STARTUP_MARKER="$startup_marker" "$python_bin" examples/modal-gpu-snapshot/qwen_gpu_fixture.py >"$log" 2>&1
 for _attempt in $(seq 1 180); do
     if grep -q 'model-ready' "$log"; then break; fi
     sleep 1
@@ -42,6 +43,7 @@ after=$(grep 'gpu-model-checksum' "$log" | tail -1)
 after_checksum=$(printf '%s\n' "$after" | sed -n 's/.*checksum=\([^ ]*\).*/\1/p')
 test -n "$before_checksum"
 test "$before_checksum" = "$after_checksum"
+test "$(grep -c '^model-initialized$' "$startup_marker")" -eq 1
 freeze_ms=$(( (freeze_time - before_time) / 1000000 ))
 restore_ms=$(( (restore_time - freeze_time) / 1000000 ))
 echo "=== Modal-style GPU snapshot report ==="
@@ -52,3 +54,4 @@ echo "After restore:  $after"
 echo "Freeze time: ${freeze_ms} ms"
 echo "Restore time: ${restore_ms} ms"
 echo "GPU model checksum preserved."
+echo "Model initialization count after restore: $(grep -c '^model-initialized$' "$startup_marker") (expected 1)."
