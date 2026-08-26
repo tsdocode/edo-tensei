@@ -15,44 +15,45 @@ pub struct Cli {
 pub enum Command {
     /// Inspect host capabilities required by Edo.
     Doctor {
-        /// Emit machine-readable JSON instead of human-readable output.
         #[arg(long)]
         json: bool,
     },
-
     /// Start a managed process.
     Run {
-        /// Stable Edo name used to resolve the process later.
         #[arg(long)]
         name: String,
-        /// Command and arguments to execute.
         #[arg(required = true, trailing_var_arg = true)]
         command: Vec<String>,
     },
-
     /// Create a CPU-only CRIU snapshot.
-    CpuDump {
-        /// Managed process name or PID.
-        target: String,
-        /// Destination snapshot directory.
-        snapshot: String,
-    },
-
+    CpuDump { target: String, snapshot: String },
     /// Restore a CPU-only CRIU snapshot.
-    CpuRestore {
-        /// Snapshot directory.
-        snapshot: String,
+    CpuRestore { snapshot: String },
+    /// Query the CUDA checkpoint state of a process without changing it.
+    CudaState { pid: i32 },
+    /// Run CUDA lock, checkpoint, restore, and unlock on a native CUDA process.
+    CudaRoundtrip {
+        pid: i32,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+        #[arg(long, default_value_t = 5_000)]
+        lock_timeout_ms: u32,
     },
-
-    /// Freeze a managed CUDA process.
+    /// Lock CUDA, checkpoint GPU state, then dump the CPU process with CRIU.
     Freeze {
         /// Managed process name or PID.
         target: String,
-    },
-
-    /// Restore a complete Edo snapshot.
-    Summon {
-        /// Snapshot directory.
+        /// Destination CUDA+CRIU snapshot directory.
         snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+        #[arg(long, default_value_t = 5_000)]
+        lock_timeout_ms: u32,
+    },
+    /// Restore a CUDA+CRIU snapshot and resume the GPU process.
+    Summon {
+        snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
     },
 }
