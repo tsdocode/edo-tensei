@@ -265,7 +265,7 @@ fn freeze_group(
         }
     }
     let directory = PathBuf::from(snapshot_directory);
-    if let Err(error) = criu::dump(root.pid, &directory) {
+    if let Err(error) = criu::dump_group(root.pid, &directory) {
         let _ = recover_many(&cuda, &locked, timeout, poll);
         return Err(error).context("CRIU group dump failed; CUDA recovery was attempted");
     }
