@@ -46,10 +46,21 @@ fn main() -> Result<()> {
             timeout_ms,
             lock_timeout_ms,
         } => freeze(&target, &snapshot, timeout_ms, lock_timeout_ms),
+        Command::FreezeGroup {
+            root,
+            cuda_pids,
+            snapshot,
+            timeout_ms,
+            lock_timeout_ms,
+        } => freeze_group(&root, &cuda_pids, &snapshot, timeout_ms, lock_timeout_ms),
         Command::Summon {
             snapshot,
             timeout_ms,
         } => summon(&snapshot, timeout_ms),
+        Command::SummonGroup {
+            snapshot,
+            timeout_ms,
+        } => summon_group(&snapshot, timeout_ms),
     }
 }
 
@@ -174,6 +185,170 @@ fn summon(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
     cuda.wait_for_state(restored_pid, cuda::ProcessState::Running, timeout, poll)?;
     println!("CUDA+CRIU snapshot resumed: PID {restored_pid} RUNNING");
     journal(&directory, "summon.ready")?;
+    Ok(())
+}
+
+fn freeze_group(
+    root_target: &str,
+    cuda_pid_list: &str,
+    snapshot_directory: &str,
+    timeout_ms: u64,
+    lock_timeout_ms: u32,
+) -> Result<()> {
+    let root = process::resolve(root_target)?;
+    let tree = process::tree(root.pid)?;
+    let cuda_pids = parse_pids(cuda_pid_list)?;
+    let cuda_records = cuda_pids
+        .iter()
+        .map(|pid| {
+            tree.iter()
+                .find(|record| record.pid == *pid)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("CUDA PID {pid} is not a descendant of root {}", root.pid)
+                })
+                .map(|record| snapshot::CudaProcessRecord {
+                    pid: record.pid,
+                    proc_start_time_ticks: record.proc_start_time_ticks,
+                    executable: record.executable.clone(),
+                    cmdline: record.cmdline.clone(),
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let cuda = cuda::CudaCheckpoint::load()?;
+    cuda.initialize()?;
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll = Duration::from_millis(25);
+    for record in &cuda_records {
+        cuda.wait_for_state(
+            record.pid as i32,
+            cuda::ProcessState::Running,
+            timeout,
+            poll,
+        )?;
+    }
+    let mut locked = Vec::new();
+    for record in &cuda_records {
+        if let Err(error) = cuda.lock(record.pid as i32, lock_timeout_ms) {
+            let _ = recover_many(&cuda, &locked, timeout, poll);
+            return Err(error).context(format!("CUDA group lock failed for PID {}", record.pid));
+        }
+        if let Err(error) =
+            cuda.wait_for_state(record.pid as i32, cuda::ProcessState::Locked, timeout, poll)
+        {
+            let _ = recover_many(&cuda, &locked, timeout, poll);
+            return Err(error).context(format!(
+                "CUDA group lock state failed for PID {}",
+                record.pid
+            ));
+        }
+        locked.push(record.pid as i32);
+    }
+    for record in &cuda_records {
+        if let Err(error) = cuda.checkpoint(record.pid as i32) {
+            let _ = recover_many(&cuda, &locked, timeout, poll);
+            return Err(error).context(format!(
+                "CUDA group checkpoint failed for PID {}",
+                record.pid
+            ));
+        }
+        if let Err(error) = cuda.wait_for_state(
+            record.pid as i32,
+            cuda::ProcessState::Checkpointed,
+            timeout,
+            poll,
+        ) {
+            let _ = recover_many(&cuda, &locked, timeout, poll);
+            return Err(error).context(format!(
+                "CUDA group checkpoint state failed for PID {}",
+                record.pid
+            ));
+        }
+    }
+    let directory = PathBuf::from(snapshot_directory);
+    if let Err(error) = criu::dump(root.pid, &directory) {
+        let _ = recover_many(&cuda, &locked, timeout, poll);
+        return Err(error).context("CRIU group dump failed; CUDA recovery was attempted");
+    }
+    snapshot::write_group(&directory, &root, "cuda-criu-group", cuda_records)?;
+    println!(
+        "CUDA+CRIU process-group snapshot ready: {}",
+        directory.display()
+    );
+    Ok(())
+}
+
+fn summon_group(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
+    let directory = PathBuf::from(snapshot_directory);
+    let manifest = snapshot::read(&directory)?;
+    snapshot::verify(&directory, &manifest)?;
+    snapshot::require_group_kind(&manifest)?;
+    criu::restore(&directory)?;
+    let restored_root: u32 = fs::read_to_string(directory.join("restored.pid"))?
+        .trim()
+        .parse()?;
+    let restored_tree = process::tree(restored_root)?;
+    let mut restored_pids = Vec::new();
+    let mut used = std::collections::HashSet::new();
+    for expected in &manifest.cuda_processes {
+        let match_record = restored_tree
+            .iter()
+            .find(|record| {
+                !used.contains(&record.pid)
+                    && record.executable == expected.executable
+                    && record.cmdline == expected.cmdline
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("could not map restored CUDA process {:?}", expected.cmdline)
+            })?;
+        used.insert(match_record.pid);
+        restored_pids.push(match_record.pid as i32);
+    }
+    let cuda = cuda::CudaCheckpoint::load()?;
+    cuda.initialize()?;
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll = Duration::from_millis(25);
+    for pid in &restored_pids {
+        cuda.restore(*pid)?;
+        cuda.wait_for_state(*pid, cuda::ProcessState::Locked, timeout, poll)?;
+    }
+    for pid in &restored_pids {
+        cuda.unlock(*pid)?;
+        cuda.wait_for_state(*pid, cuda::ProcessState::Running, timeout, poll)?;
+    }
+    println!(
+        "CUDA+CRIU process group resumed: root PID {} workers {}",
+        restored_root,
+        restored_pids.len()
+    );
+    Ok(())
+}
+
+fn parse_pids(value: &str) -> Result<Vec<u32>> {
+    let mut pids = value
+        .split(',')
+        .map(|pid| {
+            pid.trim()
+                .parse::<u32>()
+                .with_context(|| format!("invalid CUDA PID '{pid}'"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    pids.sort_unstable();
+    pids.dedup();
+    if pids.is_empty() {
+        anyhow::bail!("at least one CUDA PID is required");
+    }
+    Ok(pids)
+}
+
+fn recover_many(
+    cuda: &cuda::CudaCheckpoint,
+    pids: &[i32],
+    timeout: Duration,
+    poll: Duration,
+) -> Result<()> {
+    for pid in pids {
+        recover_cuda(cuda, *pid, timeout, poll)?;
+    }
     Ok(())
 }
 

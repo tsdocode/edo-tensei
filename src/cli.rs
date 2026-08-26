@@ -67,8 +67,27 @@ pub enum Command {
         #[arg(long, default_value_t = 5_000)]
         lock_timeout_ms: u32,
     },
+    /// Lock CUDA in a process group, then dump the complete CRIU descendant tree.
+    FreezeGroup {
+        /// API/root process name or PID.
+        root: String,
+        /// Comma-separated CUDA-owning process PIDs, including the root when applicable.
+        cuda_pids: String,
+        /// Destination CUDA+CRIU group snapshot directory.
+        snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+        #[arg(long, default_value_t = 5_000)]
+        lock_timeout_ms: u32,
+    },
     /// Restore a CUDA+CRIU snapshot and resume the GPU process.
     Summon {
+        snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+    /// Restore a CUDA+CRIU process group and resume every recorded CUDA worker.
+    SummonGroup {
         snapshot: String,
         #[arg(long, default_value_t = 10_000)]
         timeout_ms: u64,

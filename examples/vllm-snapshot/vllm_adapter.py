@@ -13,6 +13,7 @@ import signal
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -121,6 +122,31 @@ def run(args: argparse.Namespace) -> int:
         print("worker process group:")
         print(json.dumps(tree, indent=2))
         print("Warm snapshot boundary passed; Sleep Mode was not used.")
+        if args.full_snapshot:
+            api = next(
+                record for record in tree
+                if "/vllm serve " in str(record["cmdline"])
+                and "nsenter" not in str(record["cmdline"])
+                and "sudo" not in str(record["cmdline"])
+            )
+            workers = [
+                record for record in tree
+                if str(record["cmdline"]).strip() == "VLLM::EngineCore"
+            ]
+            if not workers:
+                raise RuntimeError("could not identify a VLLM::EngineCore CUDA worker")
+            cuda_pids = ",".join([str(api["pid"])] + [str(worker["pid"]) for worker in workers])
+            snapshot = Path(tempfile.mkdtemp(prefix="edo-vllm-group-")) / "snapshot"
+            print(f"Freezing vLLM group root={api['pid']} CUDA_PIDs={cuda_pids}", flush=True)
+            subprocess.run(
+                ["sudo", args.edo, "freeze-group", str(api["pid"]), cuda_pids, str(snapshot)],
+                check=True,
+            )
+            subprocess.run(["sudo", args.edo, "summon-group", str(snapshot)], check=True)
+            wait_ready(base, args.startup_timeout)
+            after = warmup(base, args.model)
+            print("post-restore warmup inference:", json.dumps(after, sort_keys=True))
+            print("vLLM group restore passed")
         return 0
     finally:
         try:
@@ -132,6 +158,12 @@ def run(args: argparse.Namespace) -> int:
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait()
+        for record in process_tree(server.pid):
+            if record["pid"] != os.getpid():
+                try:
+                    os.kill(int(record["pid"]), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
 
 
 def main() -> int:
@@ -143,6 +175,8 @@ def main() -> int:
     parser.add_argument("--startup-timeout", type=int, default=300)
     parser.add_argument("--inspect-only", action="store_true")
     parser.add_argument("--pid", type=int, help="vLLM API process PID for --inspect-only")
+    parser.add_argument("--full-snapshot", action="store_true", help="run the destructive Edo group freeze/restore test")
+    parser.add_argument("--edo", default=os.environ.get("EDO_BIN", "target/debug/edo"))
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.12)
     parser.add_argument("--max-model-len", type=int, default=1024)
     return run(parser.parse_args())

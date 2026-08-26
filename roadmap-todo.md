@@ -45,12 +45,15 @@ The next engineering focus is the Phase 7 framework adapter: explicitly quiesce 
 
 ### vLLM integration status
 
-- **Phase 9 — IN PROGRESS:** The dedicated `examples/vllm-snapshot/` adapter
-  now supports a one-GPU, tensor-parallel-size-1 launch, normal warmup
-  inference, CUDA-graph-compatible startup, and worker-tree discovery. Full
-  Edo CRIU snapshots of the
-  vLLM worker group remain gated on a dedicated test port/GPU and explicit IPC,
-  NCCL, CUDA-graph, and request-draining validation.
+- **Phase 9 — IN PROGRESS / RUNTIME BLOCKED:** The dedicated
+  `examples/vllm-snapshot/` adapter supports a one-GPU,
+  tensor-parallel-size-1 launch, normal warmup inference, CUDA-graph-compatible
+  startup, worker-tree discovery, and the implemented `freeze-group` /
+  `summon-group` protocol for the API parent plus `VLLM::EngineCore`.
+  Dedicated H100 validation reaches the grouped CUDA path but vLLM returns
+  CUDA checkpoint error 55 from `cuCheckpointProcessGetState`, before locking
+  or CRIU dump. No full vLLM restore is claimed until a supported runtime
+  configuration passes this pre-lock compatibility check.
 
 ## Phase 0 — Repository and development environment
 
