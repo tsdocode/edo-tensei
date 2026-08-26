@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -31,6 +32,20 @@ pub enum Command {
     CpuRestore { snapshot: String },
     /// Validate snapshot compatibility, permissions, and image checksums.
     SnapshotCheck { snapshot: String },
+    /// Check that a managed process is alive and optionally probe an HTTP health URL.
+    HealthCheck {
+        target: String,
+        #[arg(long)]
+        url: Option<String>,
+    },
+    /// Remove a snapshot directory after an explicit confirmation flag.
+    SnapshotClean {
+        snapshot: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Generate shell completions.
+    Completions { shell: Shell },
     /// Query the CUDA checkpoint state of a process without changing it.
     CudaState { pid: i32 },
     /// Run CUDA lock, checkpoint, restore, and unlock on a native CUDA process.

@@ -7,9 +7,14 @@ mod process;
 mod snapshot;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use cli::{Cli, Command};
-use std::{fs, path::PathBuf, time::Duration};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 fn main() -> Result<()> {
     init_logging();
@@ -22,6 +27,13 @@ fn main() -> Result<()> {
         Command::CpuDump { target, snapshot } => cpu_dump(&target, &snapshot),
         Command::CpuRestore { snapshot } => cpu_restore(&snapshot),
         Command::SnapshotCheck { snapshot } => snapshot_check(&snapshot),
+        Command::HealthCheck { target, url } => health_check(&target, url.as_deref()),
+        Command::SnapshotClean { snapshot, yes } => snapshot_clean(&snapshot, yes),
+        Command::Completions { shell } => {
+            let mut cli = Cli::command();
+            generate(shell, &mut cli, "edo", &mut std::io::stdout());
+            Ok(())
+        }
         Command::CudaState { pid } => cuda_state(pid),
         Command::CudaRoundtrip {
             pid,
@@ -85,6 +97,7 @@ fn freeze(
     cuda.initialize()?;
     let timeout = Duration::from_millis(timeout_ms);
     let poll = Duration::from_millis(25);
+    journal(&directory, "freeze.started")?;
 
     cuda.wait_for_state(
         process.pid as i32,
@@ -93,6 +106,7 @@ fn freeze(
         poll,
     )?;
     println!("freeze: CUDA RUNNING → LOCKED");
+    journal(&directory, "cuda.lock.started")?;
     cuda.lock(process.pid as i32, lock_timeout_ms)?;
     if let Err(error) = cuda.wait_for_state(
         process.pid as i32,
@@ -105,6 +119,7 @@ fn freeze(
     }
 
     println!("freeze: LOCKED → CHECKPOINTED");
+    journal(&directory, "cuda.checkpoint.started")?;
     if let Err(error) = cuda.checkpoint(process.pid as i32) {
         let _ = recover_cuda(&cuda, process.pid as i32, timeout, poll);
         return Err(error).context("CUDA checkpoint failed; process recovery was attempted");
@@ -121,6 +136,7 @@ fn freeze(
     }
 
     println!("freeze: CHECKPOINTED → CRIU DUMPING");
+    journal(&directory, "criu.dump.started")?;
     if let Err(error) = criu::dump(process.pid, &directory) {
         let recovery = recover_cuda(&cuda, process.pid as i32, timeout, poll);
         return Err(error).context(format!(
@@ -133,6 +149,7 @@ fn freeze(
             .context("could not write CUDA snapshot manifest; CUDA recovery was attempted");
     }
     println!("CUDA+CRIU snapshot ready: {}", directory.display());
+    journal(&directory, "snapshot.ready")?;
     Ok(())
 }
 
@@ -149,12 +166,14 @@ fn summon(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
     cuda.initialize()?;
     let timeout = Duration::from_millis(timeout_ms);
     let poll = Duration::from_millis(25);
+    journal(&directory, "summon.started")?;
     println!("summon: CRIU restored PID {restored_pid}; CUDA RESTORE");
     cuda.restore(restored_pid)?;
     cuda.wait_for_state(restored_pid, cuda::ProcessState::Locked, timeout, poll)?;
     cuda.unlock(restored_pid)?;
     cuda.wait_for_state(restored_pid, cuda::ProcessState::Running, timeout, poll)?;
     println!("CUDA+CRIU snapshot resumed: PID {restored_pid} RUNNING");
+    journal(&directory, "summon.ready")?;
     Ok(())
 }
 
@@ -217,6 +236,65 @@ fn snapshot_check(snapshot_directory: &str) -> Result<()> {
         manifest.files.len(),
         manifest.host.hostname
     );
+    Ok(())
+}
+
+fn health_check(target: &str, url: Option<&str>) -> Result<()> {
+    let process = process::resolve(target)?;
+    if let Some(url) = url {
+        let output = std::process::Command::new("curl")
+            .args(["--silent", "--show-error", "--fail", "--max-time", "5", url])
+            .output()
+            .with_context(|| "could not execute curl for health check")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "health URL failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    println!("healthy: PID {} target {}", process.pid, target);
+    Ok(())
+}
+
+fn snapshot_clean(snapshot_directory: &str, yes: bool) -> Result<()> {
+    if !yes {
+        anyhow::bail!("refusing to remove snapshot without --yes");
+    }
+    let directory = PathBuf::from(snapshot_directory);
+    if !directory.is_dir() || directory.parent().is_none() {
+        anyhow::bail!("snapshot path is not a directory: {}", directory.display());
+    }
+    fs::remove_dir_all(&directory)
+        .with_context(|| format!("could not remove snapshot {}", directory.display()))?;
+    println!("removed snapshot: {}", directory.display());
+    Ok(())
+}
+
+fn journal(snapshot_directory: &Path, event: &str) -> Result<()> {
+    let name = snapshot_directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("snapshot");
+    let path = PathBuf::from(".edo")
+        .join("journal")
+        .join(format!("{name}.jsonl"));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let entry = serde_json::json!({
+        "event": event,
+        "timestamp_unix": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    });
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{entry}")?;
     Ok(())
 }
 

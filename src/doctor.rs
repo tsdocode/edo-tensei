@@ -47,6 +47,7 @@ struct Device {
 struct CudaReport {
     library: Check,
     driver: Check,
+    persistence_mode: Check,
     checkpoint_api: Check,
     device_count: Option<i32>,
     devices: Vec<Device>,
@@ -184,6 +185,7 @@ fn check_cuda() -> CudaReport {
         return CudaReport {
             library: unavailable("libcuda.so.1/libcuda.so not found"),
             driver: unavailable("CUDA driver could not be loaded"),
+            persistence_mode: check_persistence_mode(),
             checkpoint_api: unavailable("CUDA checkpoint API cannot be inspected"),
             device_count: None,
             devices: Vec::new(),
@@ -238,6 +240,7 @@ fn check_cuda() -> CudaReport {
                 available: true,
                 detail: driver,
             },
+            persistence_mode: check_persistence_mode(),
             checkpoint_api,
             device_count: Some(devices.len() as i32),
             devices,
@@ -245,10 +248,40 @@ fn check_cuda() -> CudaReport {
         Err(error) => CudaReport {
             library: library_check,
             driver: unavailable(error.to_string()),
+            persistence_mode: check_persistence_mode(),
             checkpoint_api,
             device_count: None,
             devices: Vec::new(),
         },
+    }
+}
+
+fn check_persistence_mode() -> Check {
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=persistence_mode",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+    let Ok(output) = output else {
+        return unavailable("nvidia-smi unavailable; persistence mode could not be checked");
+    };
+    if !output.status.success() {
+        return unavailable("nvidia-smi could not query persistence mode");
+    }
+    let value = command_output(&output);
+    if value.eq_ignore_ascii_case("enabled") {
+        Check {
+            available: true,
+            detail: "persistence mode is enabled".to_owned(),
+        }
+    } else {
+        Check {
+            available: false,
+            detail: format!(
+                "persistence mode is {value}; restore may require CUDA reinitialization"
+            ),
+        }
     }
 }
 
@@ -395,6 +428,7 @@ fn print_human(report: &Report) {
     );
     print_check("CUDA library", &report.cuda.library);
     print_check("CUDA driver", &report.cuda.driver);
+    print_check("CUDA persistence mode", &report.cuda.persistence_mode);
     print_check("CUDA checkpoint API", &report.cuda.checkpoint_api);
     println!(
         "  CUDA devices: {}",

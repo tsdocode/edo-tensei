@@ -2,6 +2,8 @@
 
 This server loads a real Hugging Face Transformer onto CPU during FastAPI
 lifespan startup, then exposes `/health`, `/ready`, `/state`, and `/infer`.
+`POST /quiesce` stops new inference and waits for active requests to drain;
+`POST /resume` reopens readiness after restore.
 
 Run the checkpoint demo from the repository root:
 
@@ -35,6 +37,7 @@ EDO_STARTUP_SECONDS=8           # artificial delay, in addition to model loading
 EDO_MODEL_MB=64                 # only used by the fallback
 ```
 
-The demo verifies model checksum and inference before and after restore. The
+The demo verifies readiness is withdrawn before checkpoint, restored before
+inference resumes, and model checksum/inference before and after restore. The
 Hugging Face model load is proven checkpointable only if the CRIU round trip
 passes on the host; the fallback remains available for the CRIU CPU fixture.
