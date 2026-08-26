@@ -43,6 +43,14 @@ Status values used below: `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`.
 
 The next engineering focus is the Phase 7 framework adapter: explicitly quiesce inference traffic and restore readiness around `edo freeze`.
 
+### vLLM integration status
+
+- **Phase 9 — IN PROGRESS:** The dedicated `examples/vllm-snapshot/` adapter
+  now supports a one-GPU, tensor-parallel-size-1 launch, worker-tree discovery,
+  and vLLM Sleep Mode pause/wake validation. Full Edo CRIU snapshots of the
+  vLLM worker group remain gated on a dedicated test port/GPU and explicit IPC,
+  NCCL, CUDA-graph, and request-draining validation.
+
 ## Phase 0 — Repository and development environment
 
 Goal: make the project buildable and make unsupported environments fail clearly.
@@ -399,6 +407,5 @@ Start with these tasks, in order:
 7. Implement and test `edo cpu-restore`.
 
 Do not start with PyTorch, FastAPI, persistent VRAM, or a multi-crate workspace.
-
 
 
