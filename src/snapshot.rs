@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -22,9 +22,13 @@ pub struct SnapshotManifest {
 }
 
 pub fn write(directory: &Path, process: &ProcessRecord) -> Result<()> {
+    write_kind(directory, process, "cpu-criu")
+}
+
+pub fn write_kind(directory: &Path, process: &ProcessRecord, kind: &str) -> Result<()> {
     let manifest = SnapshotManifest {
         schema_version: 1,
-        kind: "cpu-criu".to_owned(),
+        kind: kind.to_owned(),
         edo_version: env!("CARGO_PKG_VERSION").to_owned(),
         captured_pid: process.pid,
         process_name: process.name.clone(),
@@ -45,4 +49,14 @@ pub fn read(directory: &Path) -> Result<SnapshotManifest> {
     let path = directory.join("manifest.json");
     let bytes = fs::read(&path).with_context(|| format!("could not read {}", path.display()))?;
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+pub fn require_cuda_kind(manifest: &SnapshotManifest) -> Result<()> {
+    if manifest.kind != "cuda-criu" {
+        bail!(
+            "snapshot kind '{}' is not a CUDA checkpoint snapshot",
+            manifest.kind
+        );
+    }
+    Ok(())
 }
