@@ -65,7 +65,10 @@ failure. No vLLM restore is claimed yet.
   `/home/ubuntu/work/criu-vllm` on branch `edo-vllm-io-uring`. Commit
   `aaa87359d` adds the minimal idle io_uring fixture and reproduces CRIU's
   failure before implementation changes. The next task is generic idle-ring
-  checkpoint/restore, followed by broader ring features and vLLM testing.
+  checkpoint/restore, followed by broader ring features and vLLM testing. The
+  historical upstream PR #1597 was evaluated as a base, but its direct import
+  causes substantial source/API drift on current CRIU and does not build; it
+  must be ported selectively rather than copied wholesale.
 
 ## Phase 0 — Repository and development environment
 
