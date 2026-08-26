@@ -12,9 +12,13 @@ Use a different model, port, or launcher with environment variables:
 
 ```bash
 EDO_VLLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct \
-EDO_VLLM_BIN=/path/to/vllm \
+EDO_VLLM_COMMAND=/path/to/vllm \
   ./examples/vllm-snapshot/run-demo.sh --port 18080
 ```
+
+If vLLM is installed in another mount namespace, use a command wrapper such
+as `EDO_VLLM_COMMAND='sudo nsenter -t <existing-vllm-pid> -m --
+/usr/local/bin/vllm'`.
 
 The adapter sets `VLLM_SERVER_DEV_MODE=1`, enables Sleep Mode, pauses the
 engine, and wakes it again. It does not call `edo freeze` yet. vLLM has an API
@@ -36,3 +40,13 @@ python3 examples/vllm-snapshot/vllm_adapter.py \
 
 Inspection never launches or mutates a server. Replace the PID with the API
 parent process you want to inspect.
+
+## Host test result
+
+On the test H100 host, the adapter successfully launched Qwen 0.5B with vLLM
+`0.23.1rc1` and `0.26.0`, loaded the model, and discovered the API parent plus
+`VLLM::EngineCore`. Both builds returned HTTP 200 for `/health` and
+`/v1/models`, but neither registered the Sleep Mode routes. The adapter reports
+that incompatibility clearly and cleans up the complete child process group.
+The next test requires a vLLM build exposing `/is_sleeping`, `/sleep`, and
+`/wake_up`.

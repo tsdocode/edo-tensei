@@ -47,7 +47,9 @@ The next engineering focus is the Phase 7 framework adapter: explicitly quiesce 
 
 - **Phase 9 — IN PROGRESS:** The dedicated `examples/vllm-snapshot/` adapter
   now supports a one-GPU, tensor-parallel-size-1 launch, worker-tree discovery,
-  and vLLM Sleep Mode pause/wake validation. Full Edo CRIU snapshots of the
+  and vLLM Sleep Mode route detection. Host testing loaded Qwen 0.5B on vLLM
+  0.23.1rc1 and 0.26.0, but both builds lacked the documented Sleep Mode
+  routes. Full Edo CRIU snapshots of the
   vLLM worker group remain gated on a dedicated test port/GPU and explicit IPC,
   NCCL, CUDA-graph, and request-draining validation.
 
@@ -407,5 +409,4 @@ Start with these tasks, in order:
 7. Implement and test `edo cpu-restore`.
 
 Do not start with PyTorch, FastAPI, persistent VRAM, or a multi-crate workspace.
-
 
