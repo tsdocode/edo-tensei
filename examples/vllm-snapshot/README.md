@@ -51,13 +51,22 @@ On the test H100 host, the adapter successfully launched Qwen 0.5B with vLLM
 and discovered the API parent plus `VLLM::EngineCore`. The normal startup path
 captured CUDA graphs and served a warmup request successfully.
 
-The grouped freeze/restore protocol is implemented, but the first dedicated
-H100 validation is currently blocked before the lock phase: vLLM returns CUDA
-checkpoint error 55 from `cuCheckpointProcessGetState`. No CRIU image is
-created and the adapter leaves the server recoverable. This is a runtime
-compatibility result, not a successful vLLM snapshot; the next investigation
-is a supported vLLM/CUDA configuration that permits process checkpoint state
-queries while preserving CUDA graphs and engine IPC.
+The grouped freeze/restore protocol is implemented. vLLM 0.26.0 in the
+available CUDA 13 environment is not compatible with this host's CUDA process
+checkpoint driver: `cuCheckpointProcessGetState` returns undocumented driver
+values before locking. The tested CUDA 12.8 vLLM environment uses the host
+570 driver and passes the CUDA state phase for both the API parent and engine
+worker. Use that matching environment while validating the remaining CRIU
+IPC behavior:
+
+```bash
+EDO_VLLM_COMMAND='sudo nsenter -t <cuda-12.8-vllm-pid> -m -p -- /usr/local/bin/vllm' \
+  ./examples/vllm-snapshot/run-demo.sh --port 18080 --full-snapshot
+```
+
+The CUDA 12.8 run reached CRIU, but the H100 test still needs a clean,
+dedicated GPU because CRIU rejected the vLLM process group. No full vLLM
+restore is claimed until that CRIU phase passes.
 
 Run the destructive group test only on a dedicated vLLM server/GPU:
 

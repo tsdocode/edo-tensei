@@ -106,6 +106,8 @@ def run(args: argparse.Namespace) -> int:
         "--max-model-len",
         str(args.max_model_len),
     ]
+    if args.enforce_eager:
+        command.append("--enforce-eager")
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
     print("Starting dedicated vLLM server:", " ".join(command), flush=True)
@@ -179,6 +181,11 @@ def main() -> int:
     parser.add_argument("--edo", default=os.environ.get("EDO_BIN", "target/debug/edo"))
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.12)
     parser.add_argument("--max-model-len", type=int, default=1024)
+    parser.add_argument(
+        "--enforce-eager",
+        action="store_true",
+        help="disable CUDA graphs for compatibility diagnosis; graphs remain the default",
+    )
     return run(parser.parse_args())
 
 

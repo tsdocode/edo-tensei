@@ -50,10 +50,12 @@ The next engineering focus is the Phase 7 framework adapter: explicitly quiesce 
   tensor-parallel-size-1 launch, normal warmup inference, CUDA-graph-compatible
   startup, worker-tree discovery, and the implemented `freeze-group` /
   `summon-group` protocol for the API parent plus `VLLM::EngineCore`.
-  Dedicated H100 validation reaches the grouped CUDA path but vLLM returns
-  CUDA checkpoint error 55 from `cuCheckpointProcessGetState`, before locking
-  or CRIU dump. No full vLLM restore is claimed until a supported runtime
-  configuration passes this pre-lock compatibility check.
+  The vLLM 0.26 CUDA 13 environment is incompatible with the host 570 driver
+  for CUDA process checkpointing; its pre-lock state query returns
+  undocumented values. Selecting the available CUDA 12.8 vLLM environment
+  fixes the CUDA phase for both API and engine processes. That configuration
+  reaches CRIU, which still rejects the vLLM group on the current H100 test
+  setup. No full vLLM restore is claimed until the CRIU IPC phase passes.
 
 ## Phase 0 — Repository and development environment
 
