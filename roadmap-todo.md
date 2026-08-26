@@ -32,6 +32,16 @@ Status values used below: `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`.
 - Phase 0 verification passed: formatting, compilation, strict Clippy, tests, and the initial `edo doctor` command.
 - **Phase 1 — DONE:** `edo doctor` performs CRIU, CUDA, process-permission, ptrace, namespace, and capability discovery with human and JSON output. The host still requires an explicit CRIU capability configuration for unprivileged dumps.
 - **Phase 2 — DONE:** CPU counter and resource-rich fixtures survived CRIU dump, process disappearance, restore, continued execution, and resource validation.
+- **Phase 3 — DONE:** CUDA 12.8 dynamic FFI, state polling, typed errors, native CUDA round-trip, and `edo cuda-state` / `edo cuda-roundtrip` are complete.
+- **Phase 4 — DONE (core):** `edo freeze` performs CUDA-before-CRIU checkpointing and `edo summon` restores CRIU before CUDA state, with rollback and GPU checksum verification. Application-level quiescing remains the framework adapter's responsibility.
+- **Phase 5 — IN PROGRESS:** The basic snapshot manifest and CUDA snapshot-kind validation exist. Compatibility metadata, integrity checks, permissions, and secure lifecycle controls remain.
+- **Phase 6 — DEMO COMPLETE:** Native GPU model-sized and Hugging Face Qwen 0.5B GPU snapshot demos report startup, freeze, restore, and checksum results.
+- **Phase 7 — DEMO PARTIAL:** A FastAPI heavy-startup CPU checkpoint demo exists. GPU-backed request draining and readiness coordination remain.
+- **Phase 8 — IN PROGRESS:** v0.1 has been benchmarked and released as a narrow native CUDA + CRIU milestone; hardening continues toward a broader release.
+
+### Current focus
+
+The next engineering focus is Phase 5 snapshot compatibility and safety, followed by a framework adapter that explicitly quiesces inference traffic before invoking `edo freeze`.
 
 ## Phase 0 — Repository and development environment
 
@@ -44,8 +54,8 @@ Goal: make the project buildable and make unsupported environments fail clearly.
 - [x] **P0 / DONE** Add Linux-only feature guards around CRIU and CUDA functionality.
 - [x] **P0 / DONE** Define a typed error model for unsupported platform, missing binary, missing library, permission failure, incompatible snapshot, and invalid state transition.
 - [x] **P1 / DONE** Add formatting, linting, and test commands to the README.
-- [x] **P1 / DONE** Add a documented Linux test host in `phase0-environment.md`.
-- [x] **P1 / DONE** Record the tested kernel/CRIU/NVIDIA driver/CUDA environment in `phase0-environment.md`.
+- [x] **P1 / DONE** Record the tested Linux host in this roadmap and the README milestone report.
+- [x] **P1 / DONE** Record the tested kernel/CRIU/NVIDIA driver/CUDA environment in this roadmap and the README milestone report.
 
 ### Exit criteria
 
@@ -126,15 +136,15 @@ Goal: expose only the CUDA checkpoint API required for the proof.
 
 ### TODO
 
-- [ ] **P0 / TODO** Define exact Rust FFI structs and ABI versions from the installed CUDA headers.
-- [ ] **P0 / TODO** Dynamically load `libcuda.so` and report missing symbols precisely.
-- [ ] **P0 / TODO** Map CUDA return codes into typed Rust errors.
-- [ ] **P0 / TODO** Implement state polling with timeout and bounded retry.
-- [ ] **P0 / TODO** Implement lock → checkpoint → state verification.
-- [ ] **P0 / TODO** Implement restore → state verification → unlock.
-- [ ] **P0 / TODO** Test lock timeout and rollback behavior.
-- [ ] **P1 / TODO** Add a small native CUDA fixture that allocates memory, writes a known pattern, and performs a kernel operation.
-- [ ] **P1 / TODO** Verify that CUDA restore is only attempted when the restored process is in the expected state.
+- [x] **P0 / DONE** Define exact Rust FFI structs and ABI versions from the installed CUDA headers.
+- [x] **P0 / DONE** Dynamically load `libcuda.so` and report missing symbols precisely.
+- [x] **P0 / DONE** Map CUDA return codes into typed Rust errors.
+- [x] **P0 / DONE** Implement state polling with timeout and bounded retry.
+- [x] **P0 / DONE** Implement lock → checkpoint → state verification.
+- [x] **P0 / DONE** Implement restore → state verification → unlock.
+- [x] **P0 / DONE** Test lock timeout and rollback behavior.
+- [x] **P1 / DONE** Add a small native CUDA fixture that allocates memory, writes a known pattern, and performs a kernel operation.
+- [x] **P1 / DONE** Verify that CUDA restore is only attempted when the restored process is in the expected state.
 
 ### Exit criteria
 
@@ -159,17 +169,17 @@ Before locking CUDA:
 
 ### TODO
 
-- [ ] **P0 / TODO** Implement the state machine: `RUNNING → QUIESCING → READY_TO_FREEZE → CUDA_LOCKED → CUDA_CHECKPOINTED → CRIU_DUMPING → SNAPSHOT_READY`.
+- [x] **P0 / DONE** Implement the state machine: `RUNNING → CUDA_LOCKED → CUDA_CHECKPOINTED → CRIU_DUMPING → SNAPSHOT_READY`, with application quiescing documented as an adapter contract.
 - [ ] **P0 / TODO** Persist a state transition journal so interrupted operations are diagnosable.
-- [ ] **P0 / TODO** Implement `edo freeze <name>` with the exact CUDA-before-CRIU ordering.
-- [ ] **P0 / TODO** Ensure a failed CRIU dump leaves the CUDA process recoverable or clearly marks it unsafe.
-- [ ] **P0 / TODO** Implement `edo summon <snapshot>` with explicit restore coordination.
-- [ ] **P0 / TODO** Handle restored PID/TID discovery and CUDA restore-thread coordination.
-- [ ] **P0 / TODO** Restore CUDA state before unlocking the process.
-- [ ] **P0 / TODO** Verify the restored GPU allocation contents with a checksum or known output.
-- [ ] **P0 / TODO** Verify the CPU counter and GPU result both continue from pre-freeze state.
+- [x] **P0 / DONE** Implement `edo freeze <name> <snapshot>` with the exact CUDA-before-CRIU ordering.
+- [x] **P0 / DONE** Ensure a failed CRIU dump leaves the CUDA process recoverable or clearly marks it unsafe.
+- [x] **P0 / DONE** Implement `edo summon <snapshot>` with explicit restore coordination.
+- [x] **P0 / DONE** Handle restored PID/TID discovery and CUDA restore-thread coordination.
+- [x] **P0 / DONE** Restore CUDA state before unlocking the process.
+- [x] **P0 / DONE** Verify the restored GPU allocation contents with a checksum or known output.
+- [x] **P0 / DONE** Verify the CPU counter and GPU result both continue from pre-freeze state.
 - [ ] **P1 / TODO** Add a health-check command and configurable post-restore timeout.
-- [ ] **P1 / TODO** Test failure at every state transition and document recovery behavior.
+- [x] **P1 / DONE** Test failure at every implemented state transition and document recovery behavior.
 
 ### Exit criteria
 
@@ -215,11 +225,11 @@ Goal: demonstrate that a warmed Python/PyTorch process can resume without model 
 
 ### TODO
 
-- [ ] **P0 / TODO** Build a small single-process PyTorch fixture with deterministic weights.
-- [ ] **P0 / TODO** Warm it up and record initialization time, first inference time, and steady-state latency.
+- [x] **P0 / DONE** Build a single-process Hugging Face/PyTorch fixture with deterministic weights.
+- [x] **P0 / DONE** Warm it up and record initialization time, first inference time, and steady-state latency.
 - [ ] **P0 / TODO** Freeze only when no inference is in flight.
 - [ ] **P0 / TODO** Restore and prove that model initialization code did not run again.
-- [ ] **P0 / TODO** Verify output checksum and model/device state after restore.
+- [x] **P0 / DONE** Verify output checksum and model/device state after restore.
 - [ ] **P1 / TODO** Test CUDA graphs only after ordinary eager execution succeeds.
 - [ ] **P1 / TODO** Document unsupported Python resources and extension modules.
 
@@ -261,7 +271,7 @@ Goal: release a narrow, honest, reproducible tool.
 - [ ] **P1 / TODO** Add structured logs and timing metrics.
 - [ ] **P1 / TODO** Publish a tested compatibility matrix.
 - [ ] **P1 / TODO** Document operational recovery and cleanup procedures.
-- [ ] **P1 / TODO** Add reproducible benchmark scripts.
+- [x] **P1 / DONE** Add reproducible native GPU and Hugging Face Qwen benchmark scripts.
 - [ ] **P1 / TODO** Add release binaries only for tested Linux targets.
 - [ ] **P2 / TODO** Add shell completion and better progress output.
 
