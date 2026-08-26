@@ -108,8 +108,14 @@ def run(args: argparse.Namespace) -> int:
     ]
     if args.enforce_eager:
         command.append("--enforce-eager")
+    if args.no_async_scheduling:
+        command.append("--no-async-scheduling")
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
+    if args.no_async_scheduling:
+        # CRIU 4.2.1 cannot dump uvloop's anon_inode:[io_uring] mappings.
+        # Keep vLLM scheduling synchronous and force libuv's epoll path.
+        env["UVLOOP_NO_URING"] = "1"
     print("Starting dedicated vLLM server:", " ".join(command), flush=True)
     server = subprocess.Popen(command, env=env, start_new_session=True)
     try:
@@ -185,6 +191,11 @@ def main() -> int:
         "--enforce-eager",
         action="store_true",
         help="disable CUDA graphs for compatibility diagnosis; graphs remain the default",
+    )
+    parser.add_argument(
+        "--no-async-scheduling",
+        action="store_true",
+        help="disable vLLM async scheduling to avoid CRIU-unsupported io_uring state",
     )
     return run(parser.parse_args())
 
