@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Safe vLLM adapter probe for Edo's future worker-group snapshots.
+"""vLLM warm-process adapter probe for Edo's future worker-group snapshots.
 
-The default workflow only exercises vLLM's pause/sleep boundary. Full CRIU
-freezing is deliberately opt-in because vLLM's engine workers, IPC, and
-distributed state must be restored as a group.
+The default workflow warms vLLM normally, including its CUDA graph path. Full
+CRIU freezing is deliberately not implicit because vLLM's engine workers, IPC,
+and distributed state must be restored as a group.
 """
 
 import argparse
@@ -51,6 +51,23 @@ def wait_ready(base: str, timeout: int) -> None:
     raise TimeoutError(f"vLLM did not become healthy within {timeout}s")
 
 
+def warmup(base: str, model: str) -> dict:
+    status, result = request(
+        base,
+        "/v1/chat/completions",
+        method="POST",
+        body={
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with one word: ready"}],
+            "max_tokens": 8,
+            "temperature": 0,
+        },
+    )
+    if status != 200:
+        raise RuntimeError(f"vLLM warmup request failed with HTTP {status}: {result}")
+    return result
+
+
 def process_tree(pid: int) -> list[dict[str, int | str]]:
     result = []
     pending = [pid]
@@ -83,12 +100,10 @@ def run(args: argparse.Namespace) -> int:
         str(args.port),
         "--tensor-parallel-size",
         "1",
-        "--enable-sleep-mode",
         "--gpu-memory-utilization",
         str(args.gpu_memory_utilization),
         "--max-model-len",
         str(args.max_model_len),
-        "--enforce-eager",
     ]
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
@@ -99,23 +114,13 @@ def run(args: argparse.Namespace) -> int:
         print("vLLM health: ready")
         _, models = request(base, "/v1/models")
         print("model endpoint:", json.dumps(models, sort_keys=True))
+        warmup_result = warmup(base, args.model)
+        print("warmup inference:", json.dumps(warmup_result, sort_keys=True))
+        print("vLLM process is warm and ready for a snapshot")
         tree = process_tree(server.pid)
         print("worker process group:")
         print(json.dumps(tree, indent=2))
-        status, sleeping = request(base, "/is_sleeping")
-        if status != 200:
-            raise RuntimeError(
-                "vLLM Sleep Mode routes are unavailable; use a vLLM build that "
-                "exposes /is_sleeping, /sleep, and /wake_up"
-            )
-        print(f"sleep state before: HTTP {status} {sleeping}")
-        request(base, "/sleep?level=1", method="POST")
-        status, sleeping = request(base, "/is_sleeping")
-        print(f"sleep state after sleep: HTTP {status} {sleeping}")
-        request(base, "/wake_up", method="POST")
-        status, sleeping = request(base, "/is_sleeping")
-        print(f"sleep state after wake: HTTP {status} {sleeping}")
-        print("vLLM Sleep Mode boundary passed")
+        print("Warm snapshot boundary passed; Sleep Mode was not used.")
         return 0
     finally:
         try:
