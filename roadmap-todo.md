@@ -41,7 +41,11 @@ Status values used below: `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`.
 
 ### Current focus
 
-The next engineering focus is the Phase 7 framework adapter: explicitly quiesce inference traffic and restore readiness around `edo freeze`.
+The current engineering focus is the CRIU io_uring compatibility prototype
+needed by the vLLM adapter. An isolated upstream CRIU checkout now contains a
+dependency-free idle-ring reproducer and baseline runner; the baseline reaches
+CRIU mapping collection and confirms the current `anon_inode:[io_uring]`
+failure. No vLLM restore is claimed yet.
 
 ### vLLM integration status
 
@@ -56,6 +60,12 @@ The next engineering focus is the Phase 7 framework adapter: explicitly quiesce 
   fixes the CUDA phase for both API and engine processes. That configuration
   reaches CRIU, which still rejects the vLLM group on the current H100 test
   setup. No full vLLM restore is claimed until the CRIU IPC phase passes.
+
+- **Phase 10 — IN PROGRESS:** The CRIU fork/prototype lives at
+  `/home/ubuntu/work/criu-vllm` on branch `edo-vllm-io-uring`. Commit
+  `aaa87359d` adds the minimal idle io_uring fixture and reproduces CRIU's
+  failure before implementation changes. The next task is generic idle-ring
+  checkpoint/restore, followed by broader ring features and vLLM testing.
 
 ## Phase 0 — Repository and development environment
 
