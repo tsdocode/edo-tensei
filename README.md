@@ -4,7 +4,8 @@ Edo Tensei checkpoints live AI workloads and restores them with their runtime st
 
 > Warm it once. Freeze it. Let it disappear. Bring it back ready to serve.
 
-![Edo Tensei architecture](assets/architecture.svg)
+<img width="1774" height="887" alt="19388b01-0b92-4b7c-89ae-f46379f7da58" src="https://github.com/user-attachments/assets/b58ac69a-e245-4e60-a3c6-8ce691e0ab48" />
+
 
 ## The wow moment: restore beats cold start
 
