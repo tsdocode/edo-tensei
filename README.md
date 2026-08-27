@@ -79,6 +79,7 @@ CRIU restored the process memory, counter, signal handlers, open report file, an
 | [04 — Resume vLLM](examples/04_vllm_resume/) | Compiled engine process group | CUDA + vLLM + patched CRIU |
 | [05 — Restore CUDA](examples/05_cuda_restore/) | Native CUDA state | NVIDIA checkpoint API |
 | [06 — Triton snapshot](examples/06_triton_snapshot/) | Container inference server | Docker + NVIDIA Toolkit |
+| [07 — Large Gemma QAT](examples/07_vllm_gemma31b_qat/) | Large vLLM process-group snapshot | Large NVIDIA GPU + vLLM |
 | [08 — Kubernetes migration](examples/08_kubernetes_migration/) | DaemonSet agent and same-node Pod restore | k3s/Kubernetes + GPU |
 
 ## Project structure
