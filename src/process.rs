@@ -117,6 +117,32 @@ pub fn tree(root_pid: u32) -> Result<Vec<ProcessRecord>> {
     Ok(records)
 }
 
+/// Find a restored process when a runtime changes the parent/PID namespace
+/// relationship during CRIU restore.
+pub fn find_by_identity(executable: &str, cmdline: &[String]) -> Result<Vec<ProcessRecord>> {
+    let mut records = Vec::new();
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else { continue };
+        let Ok(identity) = read_identity(pid) else { continue };
+        if identity.executable == executable && identity.cmdline == cmdline {
+            records.push(ProcessRecord {
+                name: pid.to_string(),
+                pid,
+                command: identity.cmdline.clone(),
+                started_at_unix: 0,
+                proc_start_time_ticks: identity.start_time_ticks,
+                executable: identity.executable,
+                cmdline: identity.cmdline,
+            });
+        }
+    }
+    Ok(records)
+}
+
 fn write_record(record: &ProcessRecord) -> Result<()> {
     let path = record_path(&record.name);
     if let Some(parent) = path.parent() {

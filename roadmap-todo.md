@@ -602,6 +602,25 @@ source process was modified.
   source process; restore into a PID-1-only placeholder recreated and unlocked
   the CUDA process. Restore was 17.35s for the 256 MiB fixture (CUDA init
   16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
+- [x] **P1 / DONE** Run the first real vLLM container snapshot in k3s. Qwen3-0.6B
+  reached health, completed torch.compile/CUDA graph capture, served a valid
+  completion, and the API parent plus `VLLM::EngineCore` were dumped. The
+  port-io-uring fork recorded the vLLM rings; the artifact was 9.2 GiB and
+  snapshot time was 44.8s (33.8s integrity hashing).
+- [x] **P1 / DONE** Complete vLLM restore from a Kubernetes CNI placeholder.
+  The validated same-node path uses shared vLLM/Triton compile caches,
+  runtime-mount filtering, network/UTS joining, deleted-semaphore-safe dumping,
+  host-visible CUDA PID mapping, and CRIU IPv4/IPv4-mapped-IPv6 endpoint
+  remapping. A fresh Qwen3-0.6B CNI artifact
+  (`k8s-vllm-qwen3-cni-remap-2`) was 9.4 GiB; snapshot took 19.5s, CRIU
+  restore 4.9s, CUDA restore/unlock 1.6s, and Edo end-to-end restore 6.5s.
+  Source Pod IP `10.42.0.42` was remapped to destination Pod IP `10.42.0.44`.
+  After restore `/health` returned 200 and a real `/v1/completions` request
+  returned valid output in 41ms. CRIU restored the io_uring images; KV cache,
+  torch.compile artifacts, and CUDA graphs were included in the snapshot.
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery, endpoint
+  metadata lifecycle, cache volume provisioning, and readiness gates around
+  this validated same-node CNI restore path.
 - [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
   probes around this validated same-node snapshot/restore path.
 - [x] Investigate the apparent CUDA initialization latency. Instrumentation

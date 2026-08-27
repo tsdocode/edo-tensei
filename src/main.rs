@@ -342,20 +342,34 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
     let restored_root: u32 = fs::read_to_string(directory.join("restored.pid"))?
         .trim()
         .parse()?;
-    let restored_tree = process::tree(restored_root)?;
+    let mut restored_tree = process::tree(restored_root)?;
     let mut restored_pids = Vec::new();
     let mut used = std::collections::HashSet::new();
     for expected in &manifest.cuda_processes {
+        // CRIU may report a PID from the restored child PID namespace in its
+        // tree. CUDA driver ioctls require the host-visible /proc PID, so
+        // prefer the node's global process view whenever it is available.
+        let host_records = process::find_by_identity(&expected.executable, &expected.cmdline)
+            .unwrap_or_default();
+        if !host_records.is_empty() {
+            restored_tree.extend(host_records);
+        } else if !restored_tree.iter().any(|record| {
+            !used.contains(&record.pid)
+                && record.executable == expected.executable
+                && record.cmdline == expected.cmdline
+        }) {
+            // Keep the CRIU tree fallback for runtimes that do not expose a
+            // host-visible process entry yet.
+        }
         let match_record = restored_tree
             .iter()
-            .find(|record| {
+            .filter(|record| {
                 !used.contains(&record.pid)
                     && record.executable == expected.executable
                     && record.cmdline == expected.cmdline
             })
-            .ok_or_else(|| {
-                anyhow::anyhow!("could not map restored CUDA process {:?}", expected.cmdline)
-            })?;
+            .max_by_key(|record| record.pid)
+            .ok_or_else(|| anyhow::anyhow!("could not map restored CUDA process {:?}", expected.cmdline))?;
         used.insert(match_record.pid);
         restored_pids.push(match_record.pid as i32);
     }

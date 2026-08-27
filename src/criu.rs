@@ -103,7 +103,14 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
             let mountpoint = *fields.get(4)?;
             // CRIU can recreate mounts rooted at `/`; vLLM's container and
             // cache injections are bind mounts with a different root.
-            (root != "/").then_some(mountpoint)
+            let runtime_owned = matches!(
+                mountpoint,
+                "/proc" | "/sys" | "/run" | "/etc/hosts"
+                    | "/etc/hostname" | "/etc/resolv.conf"
+            ) || mountpoint.starts_with("/proc/")
+                || mountpoint.starts_with("/sys/")
+                || mountpoint.starts_with("/run/");
+            (root != "/" || runtime_owned).then_some(mountpoint)
         })
         .map(str::to_owned)
         .collect::<Vec<_>>();
@@ -114,7 +121,21 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
 
 pub fn restore(directory: &Path) -> Result<()> {
     let pidfile = directory.join("restored.pid");
-    let mut command = Command::new(criu_program());
+    let mut command = if let Some(pid) = std::env::var_os("EDO_RESTORE_MOUNT_PID") {
+        let mut command = Command::new("nsenter");
+        command.args([
+            "--target",
+            &pid.to_string_lossy(),
+            "--mount",
+            "--uts",
+            "--pid",
+            "--",
+        ]);
+        command.arg(criu_program());
+        command
+    } else {
+        Command::new(criu_program())
+    };
     command
         .arg("restore")
         .arg("--images-dir")
@@ -124,6 +145,12 @@ pub fn restore(directory: &Path) -> Result<()> {
         // The destination Pod has a different runtime-generated cgroup path;
         // Kubernetes remains responsible for placing restored processes.
         .arg("--manage-cgroups=ignore")
+        .arg("--root")
+        .arg("/")
+        // The destination is a runtime-created container mount tree.  The
+        // compatibility mount engine is less aggressive about replaying
+        // runtime-owned overlay/bind mounts than mount-v2 here.
+        .arg("--mntns-compat-mode")
         .arg("--tcp-established")
         // Give the CRIU fork a bounded worker budget for decompression and
         // direct-page paths; buffered restore remains the host default.
@@ -136,6 +163,22 @@ pub fn restore(directory: &Path) -> Result<()> {
         .arg("--log-file")
         .arg(directory.join("restore.log"))
         .arg("--verbosity=4");
+    if let Some(pid) = std::env::var_os("EDO_RESTORE_NET_PID") {
+        let net_path = if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
+            // CRIU is launched inside the placeholder mount namespace, whose
+            // private /proc exposes the placeholder as PID 1.
+            "/proc/1/ns/net".to_owned()
+        } else {
+            format!("/proc/{}/ns/net", pid.to_string_lossy())
+        };
+        command.args([
+            "--join-ns",
+            &format!("net:{net_path}"),
+        ]);
+        if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
+            command.args(["--join-ns", "uts:/proc/1/ns/uts"]);
+        }
+    }
     run(&mut command, "CRIU restore")
 }
 

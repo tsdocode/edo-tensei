@@ -34,6 +34,19 @@ def inner_pid(host_pid: int) -> int:
     return int(nspid.split()[-1]) if nspid else host_pid
 
 
+def namespace_ipv4(host_pid: int) -> str | None:
+    result = subprocess.run(
+        ["nsenter", "--target", str(host_pid), "--net", "--", "ip", "-4", "-o", "addr", "show", "scope", "global"],
+        text=True,
+        capture_output=True,
+    )
+    for line in result.stdout.splitlines():
+        for field in line.split():
+            if "/" in field and field[0].isdigit():
+                return field.split("/", 1)[0]
+    return None
+
+
 def run_in_namespace(host_pid: int, args: list[str]) -> dict:
     command = [
         "nsenter", "--target", str(host_pid), "--mount", "--uts", "--ipc",
@@ -42,6 +55,47 @@ def run_in_namespace(host_pid: int, args: list[str]) -> dict:
     env = os.environ.copy()
     env["EDO_CRIU"] = CRIU
     result = subprocess.run(command, text=True, capture_output=True, env=env)
+    return {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def run_restore_in_namespace(host_pid: int, args: list[str]) -> dict:
+    # CRIU must remain in the node's PID namespace so it can create the fresh
+    # PID namespace required by restore. The destination pod's mount, IPC,
+    # UTS, and network namespaces are still used.
+    command = [
+        "nsenter", "--target", str(host_pid), "--mount", "--uts", "--ipc",
+        "--net", "--", *args,
+    ]
+    env = os.environ.copy()
+    env["EDO_CRIU"] = CRIU
+    result = subprocess.run(command, text=True, capture_output=True, env=env)
+    return {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def run_on_node(args: list[str]) -> dict:
+    # For dump, keep the node's PID and mount namespaces. CRIU must see host
+    # PIDs and the container mount namespace through /proc; entering the pod's
+    # mount namespace first would hide host PIDs behind its private /proc.
+    env = os.environ.copy()
+    env["EDO_CRIU"] = CRIU
+    result = subprocess.run(args, text=True, capture_output=True, env=env)
+    return {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def run_restore_on_node(host_pid: int, args: list[str], source_ip: str | None = None) -> dict:
+    env = os.environ.copy()
+    env["EDO_CRIU"] = CRIU
+    # Keep the placeholder Pod's K8s network namespace; its veth cannot be
+    # recreated from the source Pod image because the peer is runtime-owned.
+    env["EDO_RESTORE_NET_PID"] = str(host_pid)
+    # Edo performs CUDA initialization in the node namespace.  The Rust
+    # restore path enters the placeholder mount namespace only for CRIU.
+    env["EDO_RESTORE_MOUNT_PID"] = str(host_pid)
+    destination_ip = namespace_ipv4(host_pid)
+    if source_ip and destination_ip and source_ip != destination_ip:
+        env["EDO_RESTORE_REMAP_IP_FROM"] = source_ip
+        env["EDO_RESTORE_REMAP_IP_TO"] = destination_ip
+    result = subprocess.run(args, text=True, capture_output=True, env=env)
     return {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
 
 
@@ -71,13 +125,31 @@ class Handler(BaseHTTPRequestHandler):
             if not snapshot.startswith(str(SNAPSHOTS) + os.sep):
                 raise ValueError("snapshot name must be relative")
             if self.path.endswith("snapshot"):
-                cuda = ",".join(str(inner_pid(int(pid))) for pid in body["cuda_pids"])
-                args = [EDO, "freeze-group", str(inner_pid(host_pid)), cuda, snapshot]
+                # Keep CRIU in the node PID namespace. Passing host PIDs lets
+                # it capture the pod's PID namespace as part of the image;
+                # entering the pod PID namespace here loses that metadata.
+                cuda = ",".join(str(int(pid)) for pid in body["cuda_pids"])
+                args = [EDO, "freeze-group", str(host_pid), cuda, snapshot]
+                result = run_on_node(args)
+                if result["returncode"] == 0:
+                    source_ip = namespace_ipv4(host_pid)
+                    if source_ip:
+                        (Path(snapshot) / "network.json").write_text(
+                            json.dumps({"source_ipv4": source_ip}) + "\n"
+                        )
             else:
                 args = [EDO, "summon-group", snapshot]
                 if body.get("skip_integrity", False):
                     args.append("--skip-integrity")
-            result = run_in_namespace(host_pid, args)
+                # The snapshot contains the source container's mount and PID
+                # namespaces. Restore from the node namespace so host PID,
+                # driver visibility, and CRIU namespace creation are intact.
+                source_ip = None
+                network_file = Path(snapshot) / "network.json"
+                if network_file.exists():
+                    source_ip = json.loads(network_file.read_text()).get("source_ipv4")
+                source_ip = body.get("source_ipv4", source_ip)
+                result = run_restore_on_node(host_pid, args, source_ip)
             self.send_json(200 if result["returncode"] == 0 else 500, result)
         except Exception as exc:  # request errors are returned as JSON
             self.send_json(400, {"error": str(exc)})

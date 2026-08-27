@@ -175,11 +175,17 @@ pub fn verify_with_options(
         );
     }
     if matches!(manifest.kind.as_str(), "cuda-criu" | "cuda-criu-group") {
-        if manifest.host.cuda_driver_version != current.cuda_driver_version {
-            bail!("snapshot NVIDIA driver does not match current driver");
+        if let (Some(required), Some(available)) =
+            (&manifest.host.cuda_driver_version, &current.cuda_driver_version)
+        {
+            if required != available {
+                bail!("snapshot NVIDIA driver does not match current driver");
+            }
         }
-        if manifest.host.gpu_name != current.gpu_name {
-            bail!("snapshot GPU model does not match current GPU");
+        if let (Some(required), Some(available)) = (&manifest.host.gpu_name, &current.gpu_name) {
+            if required != available {
+                bail!("snapshot GPU model does not match current GPU");
+            }
         }
         if let (Some(required), Some(available)) =
             (manifest.host.gpu_memory_bytes, current.gpu_memory_bytes)
@@ -211,7 +217,10 @@ fn host_manifest() -> HostManifest {
         hostname: command_output("hostname", &[]).unwrap_or_else(|| "unknown".to_owned()),
         kernel: command_output("uname", &["-r"]).unwrap_or_else(|| "unknown".to_owned()),
         architecture: std::env::consts::ARCH.to_owned(),
-        criu_version: command_output("criu", &["--version"])
+        criu_version: command_output(
+            &std::env::var("EDO_CRIU").unwrap_or_else(|_| "criu".to_owned()),
+            &["--version"],
+        )
             .unwrap_or_else(|| "unknown".to_owned()),
         cuda_driver_version: command_output(
             "nvidia-smi",

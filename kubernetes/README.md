@@ -61,6 +61,29 @@ The required Kubernetes behavior is therefore proven for this fixture. Model
 servers still need a controller to create the placeholder, map container PIDs,
 and run health/inference readiness checks before advertising service readiness.
 
+### Real vLLM container test
+
+The checked-in `vllm-qwen3-pod.yaml` runs the local `vllm-local:cuda12.8`
+container with Qwen3-0.6B on the H100. The real server reached `/health`,
+loaded its model, completed torch compilation and CUDA graph capture, and
+served a completion (`2+2 is 4.`). Cold Pod-to-API readiness was about 33.3 s.
+
+The live group snapshot of the API parent plus `VLLM::EngineCore` succeeded
+with the port-io-uring CRIU fork. CRIU logged three io_uring ring images, and
+the snapshot was 9.2 GiB. Snapshot end-to-end time was 44.8 s, including 33.8
+s for integrity hashing of an 8.7 GiB pages image. A pre-restore request took
+74 ms.
+
+The validated CNI restore path joins the destination Pod's network namespace
+and remaps source Pod IPv4 endpoints, including IPv4-mapped IPv6 TCP sockets,
+to the destination Pod IP. Shared vLLM/Triton cache volumes preserve rebuildable
+JIT artifacts required by restored mappings. The Qwen3-0.6B CNI test restored
+in 6.5s end to end (CRIU 4.9s, CUDA restore/unlock 1.6s); `/health` returned
+200 and a real completion returned valid output in 41ms. The snapshot agent
+excludes runtime-owned mounts and records the source endpoint in `network.json`.
+The remaining production work is controller-managed Pod/CRI discovery,
+metadata lifecycle, cache-volume provisioning, and readiness gating.
+
 Build the agent image and publish it to a registry reachable by every GPU node:
 
 ```bash
@@ -84,8 +107,10 @@ volume or a CSI volume with a strict access policy.
 The agent contains an optional `EDO_CUDA_PREWARM` diagnostic hook. It is
 disabled by default because testing shows that CUDA initialization state is
 process-local for this driver path; the actual restore bottleneck was snapshot
-integrity hashing. Driver and GPU compatibility must still be enforced by the
-deployment policy.
+integrity hashing. CRIU's host dependencies are kept under `/opt/edo/lib` and
+the CRIU binary uses an embedded relative runpath; do not set a global
+`LD_LIBRARY_PATH`, because that can override the target image's glibc. Driver
+and GPU compatibility must still be enforced by the deployment policy.
 
 ## Agent API
 

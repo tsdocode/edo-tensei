@@ -34,8 +34,8 @@ spec:
               value: /opt/edo/bin/edo
             - name: EDO_CRIU
               value: /opt/edo/bin/criu
-            - name: LD_LIBRARY_PATH
-              value: /opt/edo/lib:/usr/lib/x86_64-linux-gnu
+            - name: PATH
+              value: /opt/edo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             - name: SNAPSHOT_ROOT
               value: /var/lib/edo-snapshots
           ports:
