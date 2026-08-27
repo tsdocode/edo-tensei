@@ -41,7 +41,66 @@ Status values used below: `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`.
 
 ### Current focus
 
-The next engineering focus is the Phase 7 framework adapter: explicitly quiesce inference traffic and restore readiness around `edo freeze`.
+The current engineering focus is reducing the real vLLM restore-to-serving
+latency below three seconds. The working baseline is a verified grouped
+vLLM restore; the remaining gap is dominated by CRIU page restoration and
+large CUDA/process mappings rather than model loading.
+
+### vLLM integration status
+
+- **Phase 9 — DONE (single-GPU proof):** The dedicated
+  `examples/vllm-snapshot/` adapter supports a one-GPU,
+  tensor-parallel-size-1 launch, normal warmup inference, CUDA-graph-compatible
+  startup, worker-tree discovery, and the implemented `freeze-group` /
+  `summon-group` protocol for the API parent plus `VLLM::EngineCore`.
+  The CUDA 12.8 environment and patched CRIU fork now pass a real dump,
+  restore, readiness check, and post-restore chat completion without model
+  reload, recompilation, or graph recapture.
+
+- **Phase 10 — DONE (minimum io_uring support):** The CRIU fork/prototype lives at
+  `/home/ubuntu/work/criu-vllm` on branch `port-io-uring`. Commit
+  `port-io-uring` and supports the vLLM ring shape, ring data images, and
+  shared-memory remaps needed by the tested one-GPU workflow. The historical
+  upstream PR #1597 was evaluated as a base, but its direct import causes
+  substantial source/API drift on current CRIU; the implementation was ported
+  selectively. Broader ring features remain future hardening.
+
+- **Phase 11 — IN PROGRESS / PERFORMANCE:** The adapter now supports explicit
+  vLLM KV-cache release/wake and an explicit `--kv-cache-memory-bytes` budget.
+  With a 2 GiB KV budget plus trusted fast restore, the latest real Qwen
+  0.5B run produced a 7.7 GiB checkpoint and restored to serving in 5.046 s
+  (first request at 5.063 s), down from 6.524 s with the 9.8 GiB artifact.
+  The sub-3-second target is still open. Remaining work is parallel native
+  CRIU I/O and a separate GPU-weight artifact/restore path. A real native-AIO
+  trial (`--image-io-mode direct`, 16 workers) reached serving in 34.934 s on
+  this host versus 5.046 s for buffered restore, so direct I/O is not enabled
+  by default. The next target is parallel memfd/anonymous-page restoration
+  without depending on O_DIRECT.
+  With a 256 MiB KV budget, the artifact fell further to 5.77 GiB and the
+  real restore-to-serving measurement was 3.707 s (first request at 3.724 s).
+  CUDA restore transitions are now issued concurrently for independent
+  process owners; this changed the result by only about 20 ms.
+  A 16 MiB KV budget reduced the artifact to about 5.6 GiB and reached serving
+  in 3.498 s (first request at 3.515 s), but KV reduction alone does not meet
+  the target. The opt-in buffered io_uring reader restored successfully at
+  3.725 s, slightly slower than the default buffered path on this host.
+  For a batch-1 profile, one captured shape plus synchronous scheduling
+  reached a best 3.011 s to health and 3.033 s to the first warm completion.
+  Reducing the KV budget to 8 MiB produced a best 2.967 s to health and
+  2.988 s to the first warm completion. A repeat measured 3.052 s and 3.076 s,
+  so sub-3 is currently a best-case result rather than a stable bound. This
+  profile keeps CUDA graph capture enabled but trades away graph-shape coverage
+  and scheduler concurrency. Measurements are for Qwen2.5-0.5B-Instruct and do
+  not represent Qwen3-0.6B. The exact Qwen3-0.6B profile requires 64 MiB KV
+  for a 512-token context and restored successfully in 3.125–3.212 s to health
+  and 3.163–3.249 s to the first warm inference. Phase timing attributes about
+  2.3–2.6 s to CRIU private-page materialization and about 0.62 s to CUDA
+  restore; the stable under-3-second target therefore remains open.
+  A production-capacity test with 2 GiB runtime KV successfully released and
+  woke the full cache, but produced an approximately 7.1 GiB snapshot and
+  restored in 4.647 s to health (4.685 s to the first warm inference). The
+  current vLLM sleep/wake hook preserves capacity but does not yet separate KV
+  backing from the checkpoint; a CUDA VMM/GMS-style artifact remains required.
 
 ## Phase 0 — Repository and development environment
 
@@ -329,6 +388,152 @@ for the published milestone.
 
 ## GitHub issue backlog
 
+## Experimental CRIU io_uring work
+
+This is a post-v0.1 research track for vLLM/SGLang compatibility. The isolated
+CRIU fork at `../criu-vllm` currently builds and recognizes stock Linux
+io_uring VMAs and fdinfo; the focused idle-ring round trip is complete, while
+broader application compatibility is not.
+
+- [x] Build a minimal idle io_uring fixture without liburing.
+- [x] Confirm baseline CRIU fails on the io_uring VMA/fd.
+- [x] Port the historical CRIU io_uring design far enough to compile on the
+  current CRIU tree and parse current stock fdinfo.
+- [x] Confirm the patched CRIU reaches descriptor collection.
+- [x] Implement a CRIU-side duplicate and placeholder fd transfer so dump
+  completes despite the kernel rejecting io_uring `SCM_RIGHTS` transfer.
+- [x] Restore the io_uring object and replay its captured ring data.
+- [x] Bypass parasite `SCM_RIGHTS` for io_uring descriptors using a CRIU-side
+  duplicate and placeholder fd during dump.
+- [ ] Clean up that bypass and validate descriptor behavior across broader
+  io_uring feature combinations.
+- [x] Add `IORING_SETUP_SQPOLL` handling. CRIU omits the kernel-owned
+  `iou-sqp-*` helper from userspace thread enumeration and recreates it during
+  restore; the SQPOLL harness round trip passes.
+- [x] Restore a simple registered-file set by preserving fdinfo registration
+  order and resolving restored file paths.
+- [x] Restore registered buffers by serializing a flat, restorer-safe buffer
+  list in the io_uring image and issuing `IORING_REGISTER_BUFFERS` after
+  restored mappings exist; the `--buffers` round-trip restores two buffers
+  sharing one VMA.
+- [ ] Make registered-file resolution robust for
+  duplicate paths, deleted files, and non-path-backed descriptors.
+- [x] Accept duplicate fixed-file slots that reference the same open-file
+  description using `kcmp(KCMP_FILE)` while continuing to reject ambiguous
+  independent descriptors; the `--duplicate-files` round-trip passes.
+- [x] Restore a memfd-backed registered file by matching its preserved
+  `/memfd:*` descriptor identity; the `--memfd-file` round-trip passes.
+- [x] Normalize basename and ` (deleted)` fdinfo/proc-link differences for
+  deleted-but-open registered files; the `--deleted-file` round-trip passes.
+- [x] Restore sparse fixed-file tables from `UserFiles` entries containing
+  `<none>` by using `IORING_REGISTER_FILES2` plus slot updates; the
+  `--sparse-files` round-trip passes.
+- [x] Apply registered-file restoration consistently to both stock and
+  extended fdinfo parser formats.
+- [x] Add conditional restore for registered eventfds and async eventfds when
+  fdinfo exposes their descriptor numbers.
+- [ ] Validate eventfd/async-eventfd restore on a kernel that exposes those
+  lines.
+- [x] Restore an attached shared workqueue by correlating the shared
+  `SqThread` identity when stock fdinfo omits `WqFd`; explicit `WqFd` parser
+  plumbing and fail-closed descriptor validation are also present. The
+  `--attach-wq` fixture covers an un-mapped parent ring and verifies that both
+  restored rings share one SQPOLL thread.
+- [x] Restore ring mappings at their original virtual addresses. The prototype
+  now reserves page-aligned user memory and restores the ring with
+  `IORING_SETUP_NO_MMAP`, avoiding the kernel's rejected address-directed
+  io_uring `mmap` path.
+- [x] Complete dump and restore round-trip for an idle io_uring process,
+  including repeated runs, ring/SQE VMA verification, fdinfo verification,
+  and replayed SQE data.
+- [x] Verify `SQE128`/`CQE32` formats with enlarged fixture mappings. Since
+  stock Linux fdinfo does not expose the setup flags, CRIU infers them from
+  page-rounded VMA sizes; the `--wide` dump/restore and widened-SQE sentinel
+  test pass.
+- [x] Test the design against vLLM, including CUDA graph warmup and serving
+  readiness after restore.
+- [x] Build a project-local uv vLLM environment on the H100 host with CUDA
+  PyTorch cu128, matching TorchAudio/TorchVision, Python development headers,
+  Ninja, and the editable vLLM tree; a real Qwen 0.5B server reaches healthy
+  warm serving with async scheduling and both piecewise/full CUDA graphs.
+- [x] Exercise the real vLLM group freeze path far enough to expose the
+  application-specific `rw-s`, mode-0600 `anon_inode:[io_uring]` VMA form and
+  add an explicit `EDO_CRIU` selector so tests can use the patched CRIU fork.
+- [x] Complete the real vLLM group dump/restore. With other GPU workloads
+  stopped, Qwen2.5-0.5B was warmed through vLLM's async scheduler, torch.compile,
+  FlashInfer, and piecewise/full CUDA graph capture; Edo froze both the API and
+  `VLLM::EngineCore`, CRIU dumped/restored them, and a post-restore chat request
+  succeeded. The large checkpoint is about 12 GiB; image hashing adds several
+  minutes before dump and restore.
+- [x] Validate the shipped `vllm_adapter.py` workflow end-to-end after the
+  PID-reaping fix; the adapter reports `vLLM group restore passed` and a
+  post-restore warmup response of `Ready.`. The measured run reached health
+  after 30.046 s cold and 254.678 s from restore command start (including
+  checksum verification), with a 0.018 s post-restore inference request. An
+  opt-in trusted-local fast restore skips rereading page images and reached
+  health in 7.978 s, with the first post-restore inference in 7.996 s.
+- [ ] Support `IORING_SETUP_NO_MMAP` rings whose SQ/CQ memory is anonymous
+  application memory; current Linux fdinfo provides no user-address metadata,
+  so generic association is not yet possible.
+
+### Dynamo-inspired restore performance
+
+- [x] Add a trusted-local fast restore that skips redundant SHA-256 page-image
+  reads while retaining metadata, host/GPU, presence, and size validation.
+- [x] Add an explicit vLLM quiesce/resume hook that releases unused KV-cache
+  backing while preserving serving state; the H100 test freed 2.11 GiB,
+  produced a 9.8 GiB artifact, and woke the cache in 0.005 s.
+- [x] Profile the patched CRIU restore path and validate parallel restore
+  candidates on the H100. Buffered page restoration remains the fastest safe
+  path measured: native O_DIRECT/AIO reached 34.934 s versus 5.046 s buffered,
+  while parallel CUDA transitions changed the 256 MiB result by only about
+  20 ms. An experimental zero-copy VMA mapping path was rejected because it
+  reduced CRIU copy time but did not reliably complete the vLLM CUDA handoff.
+- [ ] Prototype a separate GPU-memory weight artifact and overlap its restore
+  with CRIU process restoration; this is the GMS-equivalent track.
+- [ ] Decouple the production KV-cache capacity from checkpoint backing so a
+  large runtime cache can be recreated at the original virtual addresses after
+  restore without including its physical pages in the process snapshot.
+- [x] Exercise the exact staged vLLM lifecycle: `sleep(level=1)` followed by
+  `wake_up(tags=["weights"])` and `wake_up(tags=["kv_cache"])`. The API supports
+  reinitializing the cache this way, but the Qwen3-0.6B / 2 GiB checkpoint was
+  still about 7.1 GiB before restore, proving that vLLM-level KV discard alone
+  does not exclude the backing from CRIU's CUDA image. The run was stopped after
+  the image completed but Edo's freeze wrapper hung; no serving result is
+  claimed for this staged variant.
+- [x] Fix CRIU fork VMA recognition for kernel-reported
+  `anon_inode:[io_uring]` mappings (including synthetic mode `0600`). The
+  standalone io_uring round-trip now passes, and the vLLM dump passes this
+  parser stage.
+- [x] Diagnose the apparent post-image `freeze-group` hang: CRIU had already
+  exited successfully, while Edo was hashing the large CUDA image for the
+  integrity manifest. Manifest generation now prints per-file progress and
+  elapsed time so this work is observable rather than looking stalled.
+- [x] Validate real vLLM async scheduling end to end after the parser fix. The
+  Qwen3-0.6B group dumped/restored successfully, staged weight/KV wake passed,
+  and post-restore inference succeeded: 3.368 s to `/health`, 3.400 s to the
+  first warm inference.
+- [x] Compare streaming TTFT before and after async restore. For the same
+  Qwen3-0.6B prompt, cold/warm TTFT was 0.040 s and post-restore TTFT was
+  0.017 s (delta -0.024 s); no torch.compile or CUDA-graph recapture occurred
+  during restore, so the restored compiled/graph state remained usable.
+- [x] Test vLLM sleep level 2 as a possible backing-release shortcut. It freed
+  about 2.08 GiB, but level 2 discards model weights as well; the attempted
+  CRIU dump also failed on an `anon_inode:[io_uring]` mapping. It is therefore
+  not a no-reload solution and is retained only as a negative experiment.
+
+Current result: the patched CRIU binary builds, ordinary processes still dump,
+and idle io_uring processes pass repeated dump/restore round trips for default,
+SQPOLL, registered-file, sparse-file, deleted-file, memfd, duplicate-slot,
+registered-buffer, SQE128/CQE32, and attached shared-workqueue cases. The
+fixture also covers an un-mapped workqueue parent and verifies restored ring
+addresses, fdinfo state, and replayed SQE data. CRIU unit tests and an
+ordinary-process dump also pass. The implementation is still a focused
+prototype: eventfd discovery, NO_MMAP rings, and independent same-path
+identity remain unvalidated. The real vLLM environment, warmup path, full
+group restore, and post-restore serving request are now validated; no vLLM
+source process was modified.
+
 ### P0 issues
 
 1. Linux platform and capability detection
@@ -399,6 +604,3 @@ Start with these tasks, in order:
 7. Implement and test `edo cpu-restore`.
 
 Do not start with PyTorch, FastAPI, persistent VRAM, or a multi-crate workspace.
-
-
-

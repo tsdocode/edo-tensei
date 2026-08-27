@@ -3,5 +3,7 @@ Cargo.lock
 .env
 *.log
 .edo/
+.venv-vllm/
+.models/
 __pycache__/
 *.py[cod]

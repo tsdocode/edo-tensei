@@ -6,6 +6,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::Command,
+    time::Instant,
 };
 
 use crate::process::ProcessRecord;
@@ -25,9 +26,19 @@ pub struct SnapshotManifest {
     pub working_directory: String,
     pub environment_policy: String,
     pub process_tree: Vec<u32>,
+    #[serde(default)]
+    pub cuda_processes: Vec<CudaProcessRecord>,
     pub host: HostManifest,
     pub files: Vec<SnapshotFile>,
     pub snapshot_directory: PathBuf,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CudaProcessRecord {
+    pub pid: u32,
+    pub proc_start_time_ticks: u64,
+    pub executable: String,
+    pub cmdline: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -55,6 +66,15 @@ pub fn write(directory: &Path, process: &ProcessRecord) -> Result<()> {
 }
 
 pub fn write_kind(directory: &Path, process: &ProcessRecord, kind: &str) -> Result<()> {
+    write_group(directory, process, kind, Vec::new())
+}
+
+pub fn write_group(
+    directory: &Path,
+    process: &ProcessRecord,
+    kind: &str,
+    cuda_processes: Vec<CudaProcessRecord>,
+) -> Result<()> {
     let files = snapshot_files(directory)?;
     let manifest = SnapshotManifest {
         schema_version: 2,
@@ -74,6 +94,7 @@ pub fn write_kind(directory: &Path, process: &ProcessRecord, kind: &str) -> Resu
         environment_policy: "not captured; inherited environment must be recreated by the launcher"
             .to_owned(),
         process_tree: process_tree(process.pid),
+        cuda_processes,
         host: host_manifest(),
         files,
         snapshot_directory: directory.to_path_buf(),
@@ -103,7 +124,28 @@ pub fn require_cuda_kind(manifest: &SnapshotManifest) -> Result<()> {
     Ok(())
 }
 
+pub fn require_group_kind(manifest: &SnapshotManifest) -> Result<()> {
+    if manifest.kind != "cuda-criu-group" {
+        bail!(
+            "snapshot kind '{}' is not a CUDA process-group snapshot",
+            manifest.kind
+        );
+    }
+    if manifest.cuda_processes.is_empty() {
+        bail!("CUDA process-group snapshot has no recorded CUDA processes");
+    }
+    Ok(())
+}
+
 pub fn verify(directory: &Path, manifest: &SnapshotManifest) -> Result<()> {
+    verify_with_options(directory, manifest, true)
+}
+
+pub fn verify_with_options(
+    directory: &Path,
+    manifest: &SnapshotManifest,
+    check_integrity: bool,
+) -> Result<()> {
     if manifest.schema_version != 2 {
         bail!(
             "unsupported snapshot schema {}; expected 2",
@@ -132,7 +174,7 @@ pub fn verify(directory: &Path, manifest: &SnapshotManifest) -> Result<()> {
             current.criu_version
         );
     }
-    if manifest.kind == "cuda-criu" {
+    if matches!(manifest.kind.as_str(), "cuda-criu" | "cuda-criu-group") {
         if manifest.host.cuda_driver_version != current.cuda_driver_version {
             bail!("snapshot NVIDIA driver does not match current driver");
         }
@@ -154,9 +196,11 @@ pub fn verify(directory: &Path, manifest: &SnapshotManifest) -> Result<()> {
         if metadata.len() != expected.size {
             bail!("snapshot file size changed: {}", expected.path);
         }
-        let actual = sha256_file(&path)?;
-        if actual != expected.sha256 {
-            bail!("snapshot integrity check failed: {}", expected.path);
+        if check_integrity {
+            let actual = sha256_file(&path)?;
+            if actual != expected.sha256 {
+                bail!("snapshot integrity check failed: {}", expected.path);
+            }
         }
     }
     Ok(())
@@ -219,21 +263,35 @@ fn snapshot_files(directory: &Path) -> Result<Vec<SnapshotFile>> {
         paths.push(path);
     }
     paths.sort();
-    paths
-        .into_iter()
-        .map(|path| {
-            let metadata = fs::metadata(&path)?;
-            Ok(SnapshotFile {
-                path: path
-                    .strip_prefix(directory)
-                    .map_err(|error| anyhow!(error))?
-                    .to_string_lossy()
-                    .into_owned(),
-                size: metadata.len(),
-                sha256: sha256_file(&path)?,
-            })
-        })
-        .collect()
+    let started = Instant::now();
+    let total = paths.len();
+    let mut files = Vec::with_capacity(total);
+    for (index, path) in paths.into_iter().enumerate() {
+        let metadata = fs::metadata(&path)?;
+        eprintln!(
+            "snapshot manifest: hashing {}/{} {} ({} bytes)",
+            index + 1,
+            total,
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            metadata.len()
+        );
+        files.push(SnapshotFile {
+            path: path
+                .strip_prefix(directory)
+                .map_err(|error| anyhow!(error))?
+                .to_string_lossy()
+                .into_owned(),
+            size: metadata.len(),
+            sha256: sha256_file(&path)?,
+        });
+        eprintln!(
+            "snapshot manifest: hashed {}/{} in {:.1}s",
+            index + 1,
+            total,
+            started.elapsed().as_secs_f32()
+        );
+    }
+    Ok(files)
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
