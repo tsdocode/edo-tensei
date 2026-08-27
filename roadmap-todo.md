@@ -517,6 +517,12 @@ broader application compatibility is not.
   Qwen3-0.6B prompt, cold/warm TTFT was 0.040 s and post-restore TTFT was
   0.017 s (delta -0.024 s); no torch.compile or CUDA-graph recapture occurred
   during restore, so the restored compiled/graph state remained usable.
+- [x] Validate SGLang group snapshot/restore. SGLang 0.5.9 with Qwen3-0.6B,
+  async scheduling, torch.compile, and CUDA graph dumped and restored
+  successfully. The CRIU fork now handles SGLang's `/dev/nvidia*` character
+  device FDs and defers driver-private `-w-s` mappings to CUDA restore. The
+  restored `/model_info` endpoint returned 200 and `/generate` returned valid
+  JSON in 0.03 s; restore timing was CRIU 3.082 s, CUDA restore 3.776 s.
 - [x] Test vLLM sleep level 2 as a possible backing-release shortcut. It freed
   about 2.08 GiB, but level 2 discards model weights as well; the attempted
   CRIU dump also failed on an `anon_inode:[io_uring]` mapping. It is therefore
