@@ -80,7 +80,7 @@ product-oriented while preserving the working single-crate v0.1 core.
 ### vLLM integration status
 
 - **Phase 9 — DONE (single-GPU proof):** The dedicated
-  `examples/vllm-snapshot/` adapter supports a one-GPU,
+  `examples/04_vllm_resume/` adapter supports a one-GPU,
   tensor-parallel-size-1 launch, normal warmup inference, CUDA-graph-compatible
   startup, worker-tree discovery, and the implemented `freeze-group` /
   `summon-group` protocol for the API parent plus `VLLM::EngineCore`.
@@ -201,7 +201,7 @@ Create a small fixture process that:
 - [x] **P0 / DONE** Capture CRIU stdout, stderr, exit status, and image directory.
 - [x] **P0 / DONE** Write a CPU snapshot manifest.
 - [x] **P1 / DONE** Validate that the restored process is alive and has resumed the counter.
-- [x] **P1 / DONE** Test open files, working directory, environment, signals, and local sockets with `cpu-resource-fixture.py`.
+- [x] **P1 / DONE** Test open files, working directory, environment, signals, and local sockets with `tests/cpu/resource_fixture.py`.
 - [x] **P1 / DONE** Add cleanup for failed or partial CRIU dumps.
 
 ### Exit criteria

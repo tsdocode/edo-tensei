@@ -12,16 +12,16 @@ cleanup() {
     if [ -f "$snapshot/restored.pid" ]; then sudo kill "$(sudo cat "$snapshot/restored.pid")" 2>/dev/null || true; fi
     if [ -f ".edo/runs/$name.json" ]; then sudo kill "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' ".edo/runs/$name.json")" 2>/dev/null || true; fi
     sudo rm -rf "$parent"
-    rm -f examples/gpu-model-snapshot/gpu-model-fixture
+    rm -f examples/05_cuda_restore/gpu-model-fixture
 }
 trap cleanup EXIT INT TERM
 
 cd "$repo_root"
-gcc -I/usr/local/cuda/include examples/gpu-model-snapshot/gpu-model-fixture.c \
+gcc -I/usr/local/cuda/include examples/05_cuda_restore/gpu-model-fixture.c \
     -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64 -lcuda \
-    -o examples/gpu-model-snapshot/gpu-model-fixture
+    -o examples/05_cuda_restore/gpu-model-fixture
 "$binary" run --name "$name" -- setsid env EDO_MODEL_MB="${EDO_MODEL_MB:-64}" \
-    examples/gpu-model-snapshot/gpu-model-fixture >"$log" 2>&1
+    examples/05_cuda_restore/gpu-model-fixture >"$log" 2>&1
 pid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' ".edo/runs/$name.json")
 for _attempt in $(seq 1 20); do
     if grep -q 'model-ready' "$log"; then break; fi

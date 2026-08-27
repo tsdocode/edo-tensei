@@ -1,31 +1,50 @@
-# 01 — Stateful process
+# 01 · Stateful process
 
-The hello demo checkpointed a live process; this version makes the state transition visible through a persistent event stream.
-
-## Prerequisites
-
-Linux, Rust, Python 3, and CRIU with the permissions described by `edo doctor`.
+Make continuity visible: the restored process handles a second signal request without rerunning its initialization.
 
 ## Run
 
+Prerequisites: Linux, Python 3, Rust, CRIU, and `sudo` permission.
+
 ```bash
-./run.sh
+./examples/01_stateful_process/run.sh
 ```
 
-## Expected output
+The demo uses the same checkpoint engine as example 00 but gives the workload a longer four-second startup so the lifecycle is easy to observe.
 
-The report contains warmup and pre/post-restore request events, and the second request is handled by the restored PID.
+## Architecture, step by step
+
+```text
+counter.py + event log
+       ↓ warm-up (4 s)
+       ↓ request #1
+       ↓ CRIU dump + explicit process failure
+       ↓ CRIU restore
+       ↓ request #2 on restored PID
+```
+
+1. `run.sh` starts the stateful fixture through the managed `edo run` lifecycle.
+2. The fixture records warm-up and request events in an open JSONL file.
+3. CRIU captures the Python process while it is idle between requests.
+4. The source process is killed; the restored process reopens the same logical state and receives request #2.
+
+## Result
+
+| Check | Before checkpoint | After restore |
+| --- | --- | --- |
+| Warm-up | completed | not repeated |
+| Request event | #1 recorded | #2 recorded |
+| Process | original PID | restored PID |
+| Timing | cold start is measured | restore-to-request is measured |
+
+The JSON report is `.edo/runs/*-stateful-process.json`. Exact timings are emitted by the script, not hard-coded in this README.
 
 ## What is checkpointed?
 
-Python memory, signal handlers, open files, and the process identity are restored by CRIU.
+Python memory, the counter/event state, signal handlers, open file descriptor, and process execution context.
 
-## Limitations
+## Limitations and cleanup
 
-The example is single-host and CPU-only; active requests are intentionally drained before checkpointing.
+CPU-only, same-host, single process. Requests in flight are deliberately excluded. Temporary images and the restored process are removed automatically; reports remain available.
 
-## Cleanup
-
-The linked script removes its temporary checkpoint. Reports remain in `.edo/runs/`.
-
-Next: [02 — FastAPI resume](../02_fastapi_resume/README.md).
+Next: [02 · FastAPI resume](../02_fastapi_resume/README.md).
