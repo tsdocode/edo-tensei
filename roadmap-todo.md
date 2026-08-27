@@ -581,6 +581,17 @@ source process was modified.
 
 ## Decision gates
 
+## Triton container experiment
+
+- [x] Add a reproducible official Triton 25.05 Python-backend GPU demo with
+  a warmed CuPy model and HTTP inference validation.
+- [x] Confirm Edo/CRIU can dump the Triton server plus Python backend stub;
+  the snapshot was created successfully.
+- [ ] Restore Triton from the native Edo path. The current blocker is Docker
+  and NVIDIA Container Toolkit mount-namespace restoration (`criu/mount.c:48`),
+  before CUDA restore is reached. The next implementation should use a
+  container-aware checkpoint path or run Triton directly in the host namespace.
+
 ### Gate 1 — after Phase 2
 
 If CPU-only CRIU restore is unreliable, stop and fix process/resource handling before touching CUDA.
