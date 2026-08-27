@@ -591,6 +591,10 @@ source process was modified.
   and NVIDIA Container Toolkit mount-namespace restoration (`criu/mount.c:48`),
   before CUDA restore is reached. The next implementation should use a
   container-aware checkpoint path or run Triton directly in the host namespace.
+- [x] Add the first Kubernetes container-aware MVP: privileged node-local
+  snapshot agent, CRD, RBAC, namespace entry, PID translation, and Triton
+  deployment notes. Same-node restore with a placeholder Pod is the supported
+  scope; controller/CRI discovery and cross-node storage remain open.
 
 ### Gate 1 — after Phase 2
 

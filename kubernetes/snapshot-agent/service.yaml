@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: edo-snapshot-agent
+  namespace: edo-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: edo-snapshot-agent
+  namespace: edo-system
+spec:
+  selector:
+    matchLabels:
+      app: edo-snapshot-agent
+  template:
+    metadata:
+      labels:
+        app: edo-snapshot-agent
+    spec:
+      serviceAccountName: edo-snapshot-agent
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: agent
+          image: ghcr.io/tsdocode/edo-snapshot-agent:dev
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+          env:
+            - name: EDO_BIN
+              value: /opt/edo/bin/edo
+            - name: EDO_CRIU
+              value: /opt/edo/bin/criu
+            - name: SNAPSHOT_ROOT
+              value: /var/lib/edo-snapshots
+          ports:
+            - name: http
+              containerPort: 8787
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          volumeMounts:
+            - name: proc
+              mountPath: /proc
+            - name: dev
+              mountPath: /dev
+            - name: run
+              mountPath: /run
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+            - name: edo-binaries
+              mountPath: /opt/edo/bin
+              readOnly: true
+            - name: snapshots
+              mountPath: /var/lib/edo-snapshots
+      volumes:
+        - name: proc
+          hostPath: { path: /proc, type: Directory }
+        - name: dev
+          hostPath: { path: /dev, type: Directory }
+        - name: run
+          hostPath: { path: /run, type: Directory }
+        - name: cgroup
+          hostPath: { path: /sys/fs/cgroup, type: Directory }
+        - name: edo-binaries
+          hostPath: { path: /opt/edo/bin, type: Directory }
+        - name: snapshots
+          hostPath: { path: /var/lib/edo-snapshots, type: DirectoryOrCreate }
