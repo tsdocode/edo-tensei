@@ -40,7 +40,7 @@ echo "✓ Warm-up completed"
 
 request_pid=$(cat "$ready")
 sudo kill -USR1 "$request_pid"
-for _ in $(seq 1 50); do rg -q '"request"' "$events" && break; sleep 0.1; done
+for _ in $(seq 1 50); do grep -q '"request"' "$events" && break; sleep 0.1; done
 
 checkpoint_start_ns=$(date +%s%N)
 sudo "$binary" cpu-dump "$name" "$snapshot" >/dev/null
@@ -66,9 +66,9 @@ sudo "$binary" cpu-restore "$snapshot" >/dev/null
 restored_pid=$(sudo cat "$snapshot/restored.pid")
 for _ in $(seq 1 50); do sudo kill -0 "$restored_pid" 2>/dev/null && break; sleep 0.1; done
 sudo kill -USR1 "$restored_pid"
-for _ in $(seq 1 50); do [ "$(rg -c '"request"' "$events" 2>/dev/null || true)" -ge 2 ] && break; sleep 0.1; done
+for _ in $(seq 1 50); do [ "$(grep -c '"request"' "$events" 2>/dev/null || true)" -ge 2 ] && break; sleep 0.1; done
 restore_end_ns=$(date +%s%N)
-test "$(rg -c '"request"' "$events")" -ge 2
+test "$(grep -c '"request"' "$events")" -ge 2
 echo "✓ Restored successfully"
 echo "✓ Request completed after restore"
 
