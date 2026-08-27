@@ -1,31 +1,60 @@
-# 04 — Resume vLLM
+# 04 · Resume vLLM
 
-Run the real one-GPU vLLM adapter after warmup, CUDA graph capture, and request draining.
-
-## Prerequisites
-
-The project vLLM environment, one NVIDIA GPU, the patched CRIU fork, and the model cache. See the detailed [vLLM notes](../../docs/integrations/vllm.md).
+Restore a warmed one-GPU vLLM server group — API parent plus `VLLM::EngineCore` — and answer a request without model reload, torch.compile, or CUDA-graph recapture.
 
 ## Run
 
+Prerequisites: Linux, one NVIDIA GPU, CUDA checkpoint symbols, the project vLLM environment, cached model, patched CRIU fork, and a dedicated server. Read [the vLLM integration notes](../../docs/integrations/vllm.md).
+
 ```bash
-./run.sh
+./examples/04_vllm_resume/run.sh --help
 ```
 
-## Expected output
+For the destructive end-to-end test:
 
-The API and `VLLM::EngineCore` are restored as a group and a post-restore completion succeeds without model reload or graph recapture.
+```bash
+EDO_VLLM_COMMAND=/path/to/vllm \
+./examples/04_vllm_resume/run.sh --port 18080 --full-snapshot
+```
+
+## Architecture, step by step
+
+```text
+API parent ─┐                         ┌─ CRIU process images
+            ├─ warm-up + CUDA graphs ─┤
+EngineCore ─┘                         └─ CRIU fork io_uring support
+                 ↓ freeze-group
+          CUDA lock → CUDA checkpoint → CRIU dump
+                 ↓ summon-group
+          CRIU restore → CUDA restore → readiness → completion
+```
+
+1. The adapter starts vLLM with tensor parallel size 1 and waits for `/health`.
+2. A warm completion exercises the scheduler, torch.compile, FlashInfer, and configured CUDA graphs.
+3. The request stream is drained and Edo discovers the API/engine process group.
+4. `freeze-group` locks every CUDA owner before CRIU captures the process tree and io_uring descriptors.
+5. `summon-group` restores the tree, restores CUDA state, waits for both owners to be `RUNNING`, and sends a completion request.
+
+## Result
+
+Validated Qwen3-0.6B async run:
+
+| Metric | Cold start | After restore |
+| --- | ---: | ---: |
+| Ready | 30.046 s | 3.368 s |
+| First warm inference | 30.080 s | 3.400 s |
+| Model reload | yes | no |
+| CUDA graph recapture | startup only | no |
+| Completion | valid | valid |
+
+The measured run also reported streaming TTFT of 0.040s before and 0.017s after restore. Results depend heavily on checkpoint image size, hashing mode, KV budget, and storage.
 
 ## What is checkpointed?
 
-The vLLM process group, compiled runtime state, CUDA state, io_uring descriptors, and model memory covered by the tested snapshot.
+The tested process group, compiled runtime state, CUDA context/device state, model memory, CUDA graphs, and io_uring state. KV-cache backing is currently included in the large process/CUDA image; a separate weight/KV artifact remains future work.
 
-## Limitations
+## Limitations and cleanup
 
-One GPU and tensor-parallel size 1 only. KV-cache backing remains a known optimization area.
+One GPU, same host, tensor parallel size 1. The full snapshot is destructive to the dedicated server; do not run it against production traffic. Use `--fast-restore` only for trusted local images.
 
-## Cleanup
-
-Run only against a dedicated server; the full snapshot flow is destructive to that process.
-
-Next: [05 — CUDA restore](../05_cuda_restore/README.md).
+Next: [05 · CUDA restore](../05_cuda_restore/README.md).
