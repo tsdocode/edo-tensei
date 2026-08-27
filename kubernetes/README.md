@@ -7,6 +7,32 @@ mount namespace together with the CRIU images.
 
 ## Build and install
 
+### Local k3s GPU test
+
+The development machine was validated with k3s `v1.36.3+k3s1` and the
+NVIDIA device plugin `v0.19.3`. Install k3s without Traefik, then configure
+the device plugin to use the NVIDIA runtime:
+
+```bash
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --disable=traefik --write-kubeconfig-mode=640' sh -
+sudo k3s kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.19.3/deployments/static/nvidia-device-plugin.yml
+sudo k3s kubectl -n kube-system patch daemonset nvidia-device-plugin-daemonset \
+  --type='strategic' -p '{"spec":{"template":{"spec":{"runtimeClassName":"nvidia"}}}}'
+```
+
+Verify that the node advertises a GPU and run the checked-in smoke test:
+
+```bash
+sudo k3s kubectl get nodes -o wide
+sudo k3s kubectl apply -f kubernetes/gpu-smoke-test.yaml
+sudo k3s kubectl -n edo-system wait --for=jsonpath='{.status.phase}'=Succeeded pod/edo-gpu-smoke --timeout=180s
+sudo k3s kubectl -n edo-system logs pod/edo-gpu-smoke
+```
+
+On the validated host this reports an NVIDIA H100 80GB with driver 570.211.01
+and CUDA 12.8. The smoke test is only a GPU/runtime check; it does not yet
+checkpoint a Kubernetes workload.
+
 Build the agent image and publish it to a registry reachable by every GPU node:
 
 ```bash

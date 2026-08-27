@@ -595,6 +595,10 @@ source process was modified.
   snapshot agent, CRD, RBAC, namespace entry, PID translation, and Triton
   deployment notes. Same-node restore with a placeholder Pod is the supported
   scope; controller/CRI discovery and cross-node storage remain open.
+- [x] Install a local k3s cluster and validate NVIDIA runtime integration with
+  the device plugin and a CUDA smoke-test Pod (H100, CUDA 12.8).
+- [ ] **P1 / NEXT** Run the Edo snapshot agent inside k3s against a real GPU
+  workload, including container-aware dump/restore and readiness validation.
 
 ### Gate 1 — after Phase 2
 
