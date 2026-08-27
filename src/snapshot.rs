@@ -175,11 +175,18 @@ pub fn verify_with_options(
         );
     }
     if matches!(manifest.kind.as_str(), "cuda-criu" | "cuda-criu-group") {
-        if manifest.host.cuda_driver_version != current.cuda_driver_version {
-            bail!("snapshot NVIDIA driver does not match current driver");
+        if let (Some(required), Some(available)) = (
+            &manifest.host.cuda_driver_version,
+            &current.cuda_driver_version,
+        ) {
+            if required != available {
+                bail!("snapshot NVIDIA driver does not match current driver");
+            }
         }
-        if manifest.host.gpu_name != current.gpu_name {
-            bail!("snapshot GPU model does not match current GPU");
+        if let (Some(required), Some(available)) = (&manifest.host.gpu_name, &current.gpu_name) {
+            if required != available {
+                bail!("snapshot GPU model does not match current GPU");
+            }
         }
         if let (Some(required), Some(available)) =
             (manifest.host.gpu_memory_bytes, current.gpu_memory_bytes)
@@ -211,8 +218,11 @@ fn host_manifest() -> HostManifest {
         hostname: command_output("hostname", &[]).unwrap_or_else(|| "unknown".to_owned()),
         kernel: command_output("uname", &["-r"]).unwrap_or_else(|| "unknown".to_owned()),
         architecture: std::env::consts::ARCH.to_owned(),
-        criu_version: command_output("criu", &["--version"])
-            .unwrap_or_else(|| "unknown".to_owned()),
+        criu_version: command_output(
+            &std::env::var("EDO_CRIU").unwrap_or_else(|_| "criu".to_owned()),
+            &["--version"],
+        )
+        .unwrap_or_else(|| "unknown".to_owned()),
         cuda_driver_version: command_output(
             "nvidia-smi",
             &[
@@ -295,6 +305,22 @@ fn snapshot_files(directory: &Path) -> Result<Vec<SnapshotFile>> {
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
+    // GNU coreutils uses the platform's optimized SHA implementation (SHA-NI
+    // on the test host). This is substantially faster than the portable
+    // Rust implementation for multi-hundred-MiB CRIU page images. Keep the
+    // Rust path as a portable fallback for minimal images.
+    if let Ok(output) = Command::new("sha256sum").arg(path).output() {
+        if output.status.success() {
+            if let Some(hash) = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .next()
+            {
+                if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Ok(hash.to_owned());
+                }
+            }
+        }
+    }
     let mut file =
         fs::File::open(path).with_context(|| format!("could not read {}", path.display()))?;
     let mut digest = Sha256::new();

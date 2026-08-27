@@ -517,6 +517,12 @@ broader application compatibility is not.
   Qwen3-0.6B prompt, cold/warm TTFT was 0.040 s and post-restore TTFT was
   0.017 s (delta -0.024 s); no torch.compile or CUDA-graph recapture occurred
   during restore, so the restored compiled/graph state remained usable.
+- [x] Validate SGLang group snapshot/restore. SGLang 0.5.9 with Qwen3-0.6B,
+  async scheduling, torch.compile, and CUDA graph dumped and restored
+  successfully. The CRIU fork now handles SGLang's `/dev/nvidia*` character
+  device FDs and defers driver-private `-w-s` mappings to CUDA restore. The
+  restored `/model_info` endpoint returned 200 and `/generate` returned valid
+  JSON in 0.03 s; restore timing was CRIU 3.082 s, CUDA restore 3.776 s.
 - [x] Test vLLM sleep level 2 as a possible backing-release shortcut. It freed
   about 2.08 GiB, but level 2 discards model weights as well; the attempted
   CRIU dump also failed on an `anon_inode:[io_uring]` mapping. It is therefore
@@ -574,6 +580,58 @@ source process was modified.
 - Sub-second restore promises before benchmarks demonstrate them.
 
 ## Decision gates
+
+## Triton container experiment
+
+- [x] Add a reproducible official Triton 25.05 Python-backend GPU demo with
+  a warmed CuPy model and HTTP inference validation.
+- [x] Confirm Edo/CRIU can dump the Triton server plus Python backend stub;
+  the snapshot was created successfully.
+- [ ] Restore Triton from the native Edo path. The current blocker is Docker
+  and NVIDIA Container Toolkit mount-namespace restoration (`criu/mount.c:48`),
+  before CUDA restore is reached. The next implementation should use a
+  container-aware checkpoint path or run Triton directly in the host namespace.
+- [x] Add the first Kubernetes container-aware MVP: privileged node-local
+  snapshot agent, CRD, RBAC, namespace entry, PID translation, and Triton
+  deployment notes. Same-node restore with a placeholder Pod is the supported
+  scope; controller/CRI discovery and cross-node storage remain open.
+- [x] Install a local k3s cluster and validate NVIDIA runtime integration with
+  the device plugin and a CUDA smoke-test Pod (H100, CUDA 12.8).
+- [x] Run the Edo snapshot agent inside k3s against a real GPU workload. Live
+  dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed the
+  source process; restore into a PID-1-only placeholder recreated and unlocked
+  the CUDA process. Restore was 17.35s for the 256 MiB fixture (CUDA init
+  16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
+- [x] **P1 / DONE** Run the first real vLLM container snapshot in k3s. Qwen3-0.6B
+  reached health, completed torch.compile/CUDA graph capture, served a valid
+  completion, and the API parent plus `VLLM::EngineCore` were dumped. The
+  port-io-uring fork recorded the vLLM rings; the artifact was 9.2 GiB and
+  snapshot time was 44.8s (33.8s integrity hashing).
+- [x] **P1 / DONE** Complete vLLM restore from a Kubernetes CNI placeholder.
+  The validated same-node path uses shared vLLM/Triton compile caches,
+  runtime-mount filtering, network/UTS joining, deleted-semaphore-safe dumping,
+  host-visible CUDA PID mapping, and CRIU IPv4/IPv4-mapped-IPv6 endpoint
+  remapping. A fresh Qwen3-0.6B CNI artifact
+  (`k8s-vllm-qwen3-cni-remap-2`) was 9.4 GiB; snapshot took 19.5s, CRIU
+  restore 4.9s, CUDA restore/unlock 1.6s, and Edo end-to-end restore 6.5s.
+  Source Pod IP `10.42.0.42` was remapped to destination Pod IP `10.42.0.44`.
+  After restore `/health` returned 200 and a real `/v1/completions` request
+  returned valid output in 41ms. CRIU restored the io_uring images; KV cache,
+  torch.compile artifacts, and CUDA graphs were included in the snapshot.
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery, endpoint
+  metadata lifecycle, cache volume provisioning, and readiness gates around
+  this validated same-node CNI restore path.
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
+  probes around this validated same-node snapshot/restore path.
+- [x] Investigate the apparent CUDA initialization latency. Instrumentation
+  showed `cuInit()` at about 11ms; the apparent 16.8s cost was integrity
+  hashing of the 832 MiB CRIU pages image.
+- [x] Optimize snapshot hashing with the native SHA-256 implementation. The
+  same fixture's snapshot creation fell from 17.70s to 2.11s; pages hashing
+  fell to about 0.7s.
+- [ ] **P1 / NEXT** Integrate a persistent restore worker only if model-server
+  benchmarks show a remaining CUDA initialization bottleneck, then validate
+  the target model-server readiness path.
 
 ### Gate 1 — after Phase 2
 

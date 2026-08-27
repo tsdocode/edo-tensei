@@ -43,10 +43,19 @@ fn dump_inner(pid: u32, directory: &Path, skipped_mounts: &[String]) -> Result<(
         .arg("--images-dir")
         .arg(directory)
         .arg("--shell-job")
+        // A namespace-entered Kubernetes agent must not wait for PID 1 to
+        // exit after dumping. The runtime owns that init process; keep the
+        // checkpoint source alive and let Edo restore/unlock CUDA below.
+        .arg("--leave-running")
         // Recreate unlinked POSIX shared-memory/semaphore mappings.
         .arg("--link-remap")
         // Preserve accepted TCP connections owned by the server.
         .arg("--tcp-established")
+        // Kubernetes owns the target cgroup hierarchy. Dumping its cgroup
+        // properties from a namespace-entered agent can block after CRIU has
+        // already written the process images, so leave cgroup recreation to
+        // the runtime and only checkpoint the process state.
+        .arg("--manage-cgroups=ignore")
         // vLLM mounts rebuildable compilation/model caches into /root/.cache.
         // They are host-side artifacts, not process state, and CRIU cannot
         // checkpoint these bind mounts when their source is outside the
@@ -94,7 +103,13 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
             let mountpoint = *fields.get(4)?;
             // CRIU can recreate mounts rooted at `/`; vLLM's container and
             // cache injections are bind mounts with a different root.
-            (root != "/").then_some(mountpoint)
+            let runtime_owned = matches!(
+                mountpoint,
+                "/proc" | "/sys" | "/run" | "/etc/hosts" | "/etc/hostname" | "/etc/resolv.conf"
+            ) || mountpoint.starts_with("/proc/")
+                || mountpoint.starts_with("/sys/")
+                || mountpoint.starts_with("/run/");
+            (root != "/" || runtime_owned).then_some(mountpoint)
         })
         .map(str::to_owned)
         .collect::<Vec<_>>();
@@ -105,13 +120,36 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
 
 pub fn restore(directory: &Path) -> Result<()> {
     let pidfile = directory.join("restored.pid");
-    let mut command = Command::new(criu_program());
+    let mut command = if let Some(pid) = std::env::var_os("EDO_RESTORE_MOUNT_PID") {
+        let mut command = Command::new("nsenter");
+        command.args([
+            "--target",
+            &pid.to_string_lossy(),
+            "--mount",
+            "--uts",
+            "--pid",
+            "--",
+        ]);
+        command.arg(criu_program());
+        command
+    } else {
+        Command::new(criu_program())
+    };
     command
         .arg("restore")
         .arg("--images-dir")
         .arg(directory)
         .arg("--restore-detached")
         .arg("--shell-job")
+        // The destination Pod has a different runtime-generated cgroup path;
+        // Kubernetes remains responsible for placing restored processes.
+        .arg("--manage-cgroups=ignore")
+        .arg("--root")
+        .arg("/")
+        // The destination is a runtime-created container mount tree.  The
+        // compatibility mount engine is less aggressive about replaying
+        // runtime-owned overlay/bind mounts than mount-v2 here.
+        .arg("--mntns-compat-mode")
         .arg("--tcp-established")
         // Give the CRIU fork a bounded worker budget for decompression and
         // direct-page paths; buffered restore remains the host default.
@@ -124,6 +162,19 @@ pub fn restore(directory: &Path) -> Result<()> {
         .arg("--log-file")
         .arg(directory.join("restore.log"))
         .arg("--verbosity=4");
+    if let Some(pid) = std::env::var_os("EDO_RESTORE_NET_PID") {
+        let net_path = if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
+            // CRIU is launched inside the placeholder mount namespace, whose
+            // private /proc exposes the placeholder as PID 1.
+            "/proc/1/ns/net".to_owned()
+        } else {
+            format!("/proc/{}/ns/net", pid.to_string_lossy())
+        };
+        command.args(["--join-ns", &format!("net:{net_path}")]);
+        if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
+            command.args(["--join-ns", "uts:/proc/1/ns/uts"]);
+        }
+    }
     run(&mut command, "CRIU restore")
 }
 

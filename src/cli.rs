@@ -48,6 +48,8 @@ pub enum Command {
     Completions { shell: Shell },
     /// Query the CUDA checkpoint state of a process without changing it.
     CudaState { pid: i32 },
+    /// Initialize the CUDA checkpoint driver before a restore request arrives.
+    CudaInit,
     /// Run CUDA lock, checkpoint, restore, and unlock on a native CUDA process.
     CudaRoundtrip {
         pid: i32,
