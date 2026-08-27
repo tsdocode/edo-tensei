@@ -24,15 +24,20 @@ fn clear_link_remap_artifacts() {
 }
 
 pub fn dump(pid: u32, directory: &Path) -> Result<()> {
-    dump_inner(pid, directory, &[])
+    dump_inner(pid, directory, &[], false)
 }
 
 pub fn dump_group(pid: u32, directory: &Path) -> Result<()> {
     let skipped_mounts = vllm_mounts(pid);
-    dump_inner(pid, directory, &skipped_mounts)
+    dump_inner(pid, directory, &skipped_mounts, true)
 }
 
-fn dump_inner(pid: u32, directory: &Path, skipped_mounts: &[String]) -> Result<()> {
+fn dump_inner(
+    pid: u32,
+    directory: &Path,
+    skipped_mounts: &[String],
+    keep_link_remaps: bool,
+) -> Result<()> {
     prepare_directory(directory)?;
     clear_link_remap_artifacts();
     let mut command = Command::new(criu_program());
@@ -63,6 +68,11 @@ fn dump_inner(pid: u32, directory: &Path, skipped_mounts: &[String]) -> Result<(
         .arg("--log-file")
         .arg(directory.join("dump.log"))
         .arg("--verbosity=4");
+    if keep_link_remaps {
+        // The CRIU fork keeps /dev/shm/link_remap.* after a successful live
+        // dump so a later restore can recreate deleted POSIX semaphores.
+        command.env("EDO_KEEP_LINK_REMAP", "1");
+    }
     for mount in skipped_mounts {
         command.args(["--skip-mnt", mount]);
     }

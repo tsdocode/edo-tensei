@@ -168,17 +168,23 @@ not been exercised in this repository.
 ## Snapshot size and KV-cache interpretation
 
 The full snapshot can be very large because process memory includes model
-weights, allocator state, compiled runtime state, and KV pages. The
-`--release-kv-cache` path uses vLLM Sleep Mode level 1 at the boundary:
+weights, allocator state, compiled runtime state, CUDA graph pools, and KV
+pages. The `--release-kv-cache` path uses vLLM Sleep Mode level 1 at the
+boundary:
 
 1. model weights stay resident in the snapshot contract;
-2. KV backing is released before CRIU hashes/captures the image;
+2. vLLM releases the reclaimable KV backing before CRIU hashes/captures the
+   image;
 3. after restore, weights are woken first; and
 4. a fresh KV allocation is initialized before readiness is reported.
 
-This makes the artifact smaller, but it does not preserve active conversations
-or token history in KV. Existing requests must be drained before the snapshot,
-and clients should retry through the serving layer after restore.
+This can make the artifact smaller, but it does not preserve active
+conversations or token history in KV. On the tested vLLM build, most of the
+44.08GiB KV allocation remained mapped after level-1 sleep, so this mode is
+not yet a true KV-excluding snapshot. A CUDA VMM/GMS-style allocation export
+is still needed to remove those pages without discarding the serving process.
+Existing requests must be drained before the snapshot, and clients should
+retry through the serving layer after restore.
 
 ## Failure diagnosis
 
@@ -210,10 +216,34 @@ its scope.
 ### Current host validation
 
 On the development H100 (driver 570.211.01, CUDA 12.8), vLLM selected
-`TRITON_ATTN` successfully and loaded all four 16.83GiB checkpoint shards. The
-run stopped before serving because the prebuilt compressed-tensors Marlin
-extension raised `cudaErrorUnsupportedPtxVersion`. Snapshot/restore latency is
-therefore intentionally not reported until Marlin is rebuilt for CUDA 12.8 or
-the host driver is upgraded to a compatible CUDA 13 toolchain.
+`TRITON_ATTN` successfully and loaded all four 16.83GiB checkpoint shards.
+The CUDA 12.8-compatible vLLM extension and the patched CRIU fork completed a
+real dump/restore with asynchronous vLLM scheduling and `io_uring` enabled.
+
+| Signal | Cold start | After restore |
+| --- | ---: | ---: |
+| `/health` ready | 112.061s | 46.532s |
+| Warm completion | 0.098s | 0.052s |
+| TTFT | 0.027s | 0.025s |
+| Snapshot artifact | — | ~71GiB |
+| Model reload / compile / graph capture | required | not repeated |
+| Output validation | `Ready.` | `Ready.` |
+
+```mermaid
+xychart-beta
+    title "Gemma QAT vLLM latency (H100, one GPU)"
+    x-axis [Cold, Restore]
+    y-axis "Seconds" 0 --> 120
+    bar [112.061, 46.532]
+```
+
+The run used `--release-kv-cache`, but vLLM level-1 sleep reported only
+3.91GiB freed from 44.08GiB of KV allocation; the resulting CRIU image was
+still approximately 71GiB. Restore itself completed in 35.229s, CUDA restore
+and unlock took 11.146s, and the first post-restore response was valid without
+model reload, torch recompilation, or CUDA-graph recapture. The remaining
+restore latency is dominated by CRIU page materialization, while the remaining
+artifact-size problem is GPU allocator/VMM ownership rather than Triton
+attention.
 
 Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).

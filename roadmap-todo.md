@@ -94,7 +94,10 @@ product-oriented while preserving the working single-crate v0.1 core.
   shared-memory remaps needed by the tested one-GPU workflow. The historical
   upstream PR #1597 was evaluated as a base, but its direct import causes
   substantial source/API drift on current CRIU; the implementation was ported
-  selectively. Broader ring features remain future hardening.
+  selectively. The fork now also preserves live-dump link-remap backing files
+  under an explicit `EDO_KEEP_LINK_REMAP=1` opt-in, fixing restore of deleted
+  POSIX semaphores used by Python multiprocessing. Broader ring features
+  remain future hardening.
 
 - **Phase 11 — IN PROGRESS / PERFORMANCE:** The adapter now supports explicit
   vLLM KV-cache release/wake and an explicit `--kv-cache-memory-bytes` budget.
@@ -132,6 +135,13 @@ product-oriented while preserving the working single-crate v0.1 core.
   restored in 4.647 s to health (4.685 s to the first warm inference). The
   current vLLM sleep/wake hook preserves capacity but does not yet separate KV
   backing from the checkpoint; a CUDA VMM/GMS-style artifact remains required.
+
+  The real Gemma 3 27B QAT + Triton attention run also completed grouped dump
+  and restore with asynchronous scheduling and io_uring enabled: cold startup
+  was 112.061 s, restore to health was 46.532 s, restore itself was 35.229 s,
+  and post-restore TTFT was 0.025 s versus 0.027 s cold. The image was about
+  71 GiB because level-1 sleep released only 3.91 GiB of a 44.08 GiB KV
+  allocation; this validates serving continuity but not KV exclusion.
 
 ## Phase 0 — Repository and development environment
 
