@@ -318,7 +318,8 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
     let verification_time = summon_started.elapsed();
     eprintln!(
         "summon-group timing: snapshot verification {:.3}s (skipped={})",
-        verification_time.as_secs_f64(), skip_integrity
+        verification_time.as_secs_f64(),
+        skip_integrity
     );
     snapshot::require_group_kind(&manifest)?;
     // Load/initialize the driver before CRIU starts. This work is independent
@@ -349,8 +350,8 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
         // CRIU may report a PID from the restored child PID namespace in its
         // tree. CUDA driver ioctls require the host-visible /proc PID, so
         // prefer the node's global process view whenever it is available.
-        let host_records = process::find_by_identity(&expected.executable, &expected.cmdline)
-            .unwrap_or_default();
+        let host_records =
+            process::find_by_identity(&expected.executable, &expected.cmdline).unwrap_or_default();
         if !host_records.is_empty() {
             restored_tree.extend(host_records);
         } else if !restored_tree.iter().any(|record| {
@@ -369,7 +370,9 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
                     && record.cmdline == expected.cmdline
             })
             .max_by_key(|record| record.pid)
-            .ok_or_else(|| anyhow::anyhow!("could not map restored CUDA process {:?}", expected.cmdline))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("could not map restored CUDA process {:?}", expected.cmdline)
+            })?;
         used.insert(match_record.pid);
         restored_pids.push(match_record.pid as i32);
     }

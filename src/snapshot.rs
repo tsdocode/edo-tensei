@@ -175,9 +175,10 @@ pub fn verify_with_options(
         );
     }
     if matches!(manifest.kind.as_str(), "cuda-criu" | "cuda-criu-group") {
-        if let (Some(required), Some(available)) =
-            (&manifest.host.cuda_driver_version, &current.cuda_driver_version)
-        {
+        if let (Some(required), Some(available)) = (
+            &manifest.host.cuda_driver_version,
+            &current.cuda_driver_version,
+        ) {
             if required != available {
                 bail!("snapshot NVIDIA driver does not match current driver");
             }
@@ -221,7 +222,7 @@ fn host_manifest() -> HostManifest {
             &std::env::var("EDO_CRIU").unwrap_or_else(|_| "criu".to_owned()),
             &["--version"],
         )
-            .unwrap_or_else(|| "unknown".to_owned()),
+        .unwrap_or_else(|| "unknown".to_owned()),
         cuda_driver_version: command_output(
             "nvidia-smi",
             &[

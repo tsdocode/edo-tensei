@@ -126,8 +126,12 @@ pub fn find_by_identity(executable: &str, cmdline: &[String]) -> Result<Vec<Proc
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        let Ok(pid) = name.parse::<u32>() else { continue };
-        let Ok(identity) = read_identity(pid) else { continue };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        let Ok(identity) = read_identity(pid) else {
+            continue;
+        };
         if identity.executable == executable && identity.cmdline == cmdline {
             records.push(ProcessRecord {
                 name: pid.to_string(),

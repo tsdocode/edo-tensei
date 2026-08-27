@@ -105,8 +105,7 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
             // cache injections are bind mounts with a different root.
             let runtime_owned = matches!(
                 mountpoint,
-                "/proc" | "/sys" | "/run" | "/etc/hosts"
-                    | "/etc/hostname" | "/etc/resolv.conf"
+                "/proc" | "/sys" | "/run" | "/etc/hosts" | "/etc/hostname" | "/etc/resolv.conf"
             ) || mountpoint.starts_with("/proc/")
                 || mountpoint.starts_with("/sys/")
                 || mountpoint.starts_with("/run/");
@@ -171,10 +170,7 @@ pub fn restore(directory: &Path) -> Result<()> {
         } else {
             format!("/proc/{}/ns/net", pid.to_string_lossy())
         };
-        command.args([
-            "--join-ns",
-            &format!("net:{net_path}"),
-        ]);
+        command.args(["--join-ns", &format!("net:{net_path}")]);
         if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
             command.args(["--join-ns", "uts:/proc/1/ns/uts"]);
         }
