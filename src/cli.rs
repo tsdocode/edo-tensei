@@ -19,6 +19,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run a guided product demo.
+    Demo { name: String },
+    /// Show whether a managed process is alive.
+    Status {
+        target: String,
+        #[arg(long)]
+        url: Option<String>,
+    },
     /// Start a managed process.
     Run {
         #[arg(long)]
@@ -30,6 +38,14 @@ pub enum Command {
     CpuDump { target: String, snapshot: String },
     /// Restore a CPU-only CRIU snapshot.
     CpuRestore { snapshot: String },
+    /// Product vocabulary alias for cpu-dump.
+    Checkpoint { target: String, snapshot: String },
+    /// Product vocabulary alias for cpu-restore.
+    Restore { snapshot: String },
+    /// Inspect snapshot metadata and integrity.
+    Inspect { snapshot: String },
+    /// Compare the high-level metadata of two snapshots.
+    Diff { first: String, second: String },
     /// Validate snapshot compatibility, permissions, and image checksums.
     SnapshotCheck { snapshot: String },
     /// Check that a managed process is alive and optionally probe an HTTP health URL.
