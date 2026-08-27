@@ -4,7 +4,7 @@ This example reuses the existing heavy-startup FastAPI workload with readiness w
 
 ## Prerequisites
 
-Python dependencies from `examples/fastapi-heavy-startup/README.md`, Linux, and CRIU.
+Python dependencies from the [FastAPI integration notes](../../docs/integrations/fastapi.md), Linux, and CRIU.
 
 ## Run
 

@@ -1,3 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/examples/vllm-snapshot/run-demo.sh" "$@"
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$repo_root"
+
+python3 examples/04_vllm_resume/vllm_adapter.py "$@"

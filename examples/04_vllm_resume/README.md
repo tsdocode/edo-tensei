@@ -4,7 +4,7 @@ Run the real one-GPU vLLM adapter after warmup, CUDA graph capture, and request 
 
 ## Prerequisites
 
-The project vLLM environment, one NVIDIA GPU, the patched CRIU fork, and the model cache. See the original [vLLM guide](../../examples/vllm-snapshot/README.md).
+The project vLLM environment, one NVIDIA GPU, the patched CRIU fork, and the model cache. See the detailed [vLLM notes](../../docs/integrations/vllm.md).
 
 ## Run
 

@@ -90,7 +90,7 @@ assets/       project artwork
 .edo/         local reports and ignored checkpoints
 ```
 
-The original implementation-oriented demos remain available under `examples/cpu-checkpoint`, `examples/vllm-snapshot`, and related paths. See [the migration guide](docs/migration.md).
+The former implementation-oriented demos are now merged into the progressive paths. See [the migration guide](docs/migration.md) for the old-to-new mapping.
 
 ## Capabilities
 

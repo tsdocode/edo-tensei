@@ -12,7 +12,7 @@ Docker, NVIDIA Container Toolkit, one GPU, and the Triton image.
 ./run.sh
 ```
 
-If Docker namespace restoration is unavailable, use the direct command in the [legacy Triton guide](../../examples/triton-snapshot/README.md).
+If Docker namespace restoration is unavailable, use the direct server command shown by `run.sh`; native container restore remains experimental.
 
 ## Expected output
 

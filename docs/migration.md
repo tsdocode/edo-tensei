@@ -1,6 +1,6 @@
 # Example migration guide
 
-The old examples remain intact so existing commands do not suddenly break. New users should use the progressive names below.
+The old implementation paths were merged into the progressive examples. Existing commands should be migrated to the new names below.
 
 | Old path | New path |
 | --- | --- |
