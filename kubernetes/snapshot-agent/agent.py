@@ -17,6 +17,17 @@ CRIU = os.environ.get("EDO_CRIU", "/opt/edo/bin/criu")
 SNAPSHOTS = Path(os.environ.get("SNAPSHOT_ROOT", "/var/lib/edo-snapshots"))
 
 
+def prewarm_cuda() -> None:
+    """Move one-time driver initialization out of restore's critical path."""
+    if os.environ.get("EDO_CUDA_PREWARM", "true").lower() not in ("1", "true", "yes"):
+        return
+    result = subprocess.run([EDO, "cuda-init"], text=True, capture_output=True, env=os.environ.copy())
+    if result.returncode:
+        print(f"CUDA prewarm failed (restore will retry): {result.stderr.strip()}", flush=True)
+    else:
+        print("CUDA checkpoint driver prewarmed", flush=True)
+
+
 def inner_pid(host_pid: int) -> int:
     values = Path(f"/proc/{host_pid}/status").read_text().splitlines()
     nspid = next((x for x in values if x.startswith("NSpid:")), "")
@@ -72,4 +83,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     SNAPSHOTS.mkdir(parents=True, exist_ok=True)
+    prewarm_cuda()
     HTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8787"))), Handler).serve_forever()

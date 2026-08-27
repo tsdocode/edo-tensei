@@ -604,6 +604,10 @@ source process was modified.
   16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
 - [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
   probes around this validated same-node snapshot/restore path.
+- [x] Move one-time CUDA checkpoint driver initialization to agent startup by
+  pre-warming `cuInit()` and mounting the host `libcuda.so.1` into the agent.
+- [ ] **P1 / NEXT** Re-run the full k3s restore benchmark after prewarm and
+  validate the target model-server readiness path.
 
 ### Gate 1 — after Phase 2
 

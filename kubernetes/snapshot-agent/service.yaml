@@ -35,7 +35,7 @@ spec:
             - name: EDO_CRIU
               value: /opt/edo/bin/criu
             - name: LD_LIBRARY_PATH
-              value: /opt/edo/lib
+              value: /opt/edo/lib:/usr/lib/x86_64-linux-gnu
             - name: SNAPSHOT_ROOT
               value: /var/lib/edo-snapshots
           ports:
@@ -62,6 +62,9 @@ spec:
             - name: edo-libraries
               mountPath: /opt/edo/lib
               readOnly: true
+            - name: cuda-driver
+              mountPath: /usr/lib/x86_64-linux-gnu/libcuda.so.1
+              readOnly: true
             - name: snapshots
               mountPath: /var/lib/edo-snapshots
       volumes:
@@ -77,5 +80,9 @@ spec:
           hostPath: { path: /opt/edo/bin, type: Directory }
         - name: edo-libraries
           hostPath: { path: /opt/edo/lib, type: Directory }
+        - name: cuda-driver
+          hostPath:
+            path: /usr/lib/x86_64-linux-gnu/libcuda.so.1
+            type: File
         - name: snapshots
           hostPath: { path: /var/lib/edo-snapshots, type: DirectoryOrCreate }

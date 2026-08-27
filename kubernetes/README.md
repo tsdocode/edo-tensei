@@ -80,6 +80,11 @@ example, `/var/lib/edo-snapshots`) so that the namespace-entered Edo process
 can see the CRIU images. In production this should be a node-local encrypted
 volume or a CSI volume with a strict access policy.
 
+The agent pre-warms `cuInit()` during DaemonSet startup. The manifest mounts
+the host `libcuda.so.1` because the agent itself does not request a GPU; this
+keeps one-time driver initialization outside the restore request. Driver and
+GPU compatibility must still be enforced by the deployment policy.
+
 ## Agent API
 
 The MVP deliberately takes PIDs; a controller can resolve Pod/container IDs

@@ -37,6 +37,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::CudaState { pid } => cuda_state(pid),
+        Command::CudaInit => cuda_init(),
         Command::CudaRoundtrip {
             pid,
             timeout_ms,
@@ -76,6 +77,11 @@ fn cuda_state(pid: i32) -> Result<()> {
         println!("CUDA restore thread: {thread_id}");
     }
     Ok(())
+}
+
+fn cuda_init() -> Result<()> {
+    let cuda = cuda::CudaCheckpoint::load()?;
+    cuda.initialize()
 }
 
 fn cuda_roundtrip(pid: i32, timeout_ms: u64, lock_timeout_ms: u32) -> Result<()> {
