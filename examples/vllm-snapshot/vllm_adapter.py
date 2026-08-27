@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,22 @@ def wait_ready(base: str, timeout: int) -> None:
     raise TimeoutError(f"vLLM did not become healthy within {timeout}s")
 
 
+def post_empty(base: str, path: str) -> None:
+    status, result = request(base, path, method="POST")
+    if status != 200:
+        raise RuntimeError(f"vLLM endpoint {path} failed with HTTP {status}: {result}")
+
+
+def wait_sleeping(base: str, expected: bool, timeout: int) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status, result = request(base, "/is_sleeping")
+        if status == 200 and isinstance(result, dict) and result.get("is_sleeping") is expected:
+            return
+        time.sleep(0.25)
+    raise TimeoutError(f"vLLM sleep state did not become {expected} within {timeout}s")
+
+
 def warmup(base: str, model: str) -> dict:
     status, result = request(
         base,
@@ -67,6 +84,53 @@ def warmup(base: str, model: str) -> dict:
     if status != 200:
         raise RuntimeError(f"vLLM warmup request failed with HTTP {status}: {result}")
     return result
+
+
+def timed_warmup(base: str, model: str) -> tuple[dict, float]:
+    started = time.monotonic()
+    result = warmup(base, model)
+    return result, time.monotonic() - started
+
+
+def timed_ttft(base: str, model: str) -> tuple[dict, float]:
+    """Measure time to the first streamed token for the fixed warmup prompt."""
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with one word: ready"}],
+            "max_tokens": 8,
+            "temperature": 0,
+            "stream": True,
+        }
+    ).encode()
+    req = Request(
+        f"{base}/v1/chat/completions",
+        data=body,
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
+    started = time.monotonic()
+    first_token = None
+    chunks = []
+    with urlopen(req, timeout=30) as response:
+        for raw_line in response:
+            line = raw_line.decode(errors="replace").strip()
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:]
+            if payload == "[DONE]":
+                continue
+            event = json.loads(payload)
+            choices = event.get("choices", [])
+            if choices and first_token is None:
+                first_token = time.monotonic() - started
+            if choices:
+                delta = choices[0].get("delta", {}).get("content")
+                if delta:
+                    chunks.append(delta)
+    if first_token is None:
+        raise RuntimeError("stream ended without a token")
+    return {"text": "".join(chunks)}, first_token
 
 
 def process_tree(pid: int) -> list[dict[str, int | str]]:
@@ -106,31 +170,70 @@ def run(args: argparse.Namespace) -> int:
         "--max-model-len",
         str(args.max_model_len),
     ]
+    if args.kv_cache_memory_bytes is not None:
+        command.extend(["--kv-cache-memory-bytes", str(args.kv_cache_memory_bytes)])
     if args.enforce_eager:
         command.append("--enforce-eager")
     if args.no_async_scheduling:
         command.append("--no-async-scheduling")
+    if args.cudagraph_capture_sizes:
+        command.extend(
+            ["--cudagraph-capture-sizes"]
+            + [str(size) for size in args.cudagraph_capture_sizes]
+        )
+    if args.compilation_config:
+        command.extend(["--compilation-config", args.compilation_config])
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
+    # When the launcher is an absolute path inside a uv/venv environment,
+    # preserve that environment for subprocesses such as Triton and
+    # FlashInfer, which discover tools (notably ninja) through PATH.
+    launcher = Path(command[0]).expanduser()
+    if not launcher.is_absolute():
+        resolved_launcher = shutil.which(command[0], path=env.get("PATH"))
+        if resolved_launcher:
+            launcher = Path(resolved_launcher).resolve()
+    else:
+        launcher = launcher.resolve()
+    if launcher.is_absolute() and launcher.parent.name == "bin":
+        env["PATH"] = f"{launcher.parent}:{env.get('PATH', '')}"
     if args.no_async_scheduling:
         # CRIU 4.2.1 cannot dump uvloop's anon_inode:[io_uring] mappings.
         # Keep vLLM scheduling synchronous and force libuv's epoll path.
         env["UVLOOP_NO_URING"] = "1"
     print("Starting dedicated vLLM server:", " ".join(command), flush=True)
+    cold_started = time.monotonic()
     server = subprocess.Popen(command, env=env, start_new_session=True)
     try:
         wait_ready(base, args.startup_timeout)
+        cold_ready_seconds = time.monotonic() - cold_started
         print("vLLM health: ready")
+        print(f"cold startup to /health: {cold_ready_seconds:.3f}s")
         _, models = request(base, "/v1/models")
         print("model endpoint:", json.dumps(models, sort_keys=True))
-        warmup_result = warmup(base, args.model)
+        warmup_result, cold_warmup_seconds = timed_warmup(base, args.model)
         print("warmup inference:", json.dumps(warmup_result, sort_keys=True))
+        print(f"cold startup to warm inference: {time.monotonic() - cold_started:.3f}s")
+        print(f"cold warmup request latency: {cold_warmup_seconds:.3f}s")
+        _, cold_ttft_seconds = timed_ttft(base, args.model)
+        print(f"cold TTFT: {cold_ttft_seconds:.3f}s")
         print("vLLM process is warm and ready for a snapshot")
         tree = process_tree(server.pid)
         print("worker process group:")
         print(json.dumps(tree, indent=2))
-        print("Warm snapshot boundary passed; Sleep Mode was not used.")
+        if args.release_kv_cache:
+            print("Warm snapshot boundary passed; vLLM KV backing will be released before checkpoint.")
+        else:
+            print("Warm snapshot boundary passed; Sleep Mode was not used.")
         if args.full_snapshot:
+            if args.release_kv_cache:
+                release_started = time.monotonic()
+                post_empty(base, f"/sleep?level={args.sleep_level}&mode=wait")
+                wait_sleeping(base, True, args.startup_timeout)
+                print(
+                    f"Dynamo-style KV-cache release: {time.monotonic() - release_started:.3f}s",
+                    flush=True,
+                )
             api = next(
                 record for record in tree
                 if "/vllm serve " in str(record["cmdline"])
@@ -147,12 +250,58 @@ def run(args: argparse.Namespace) -> int:
             snapshot = Path(tempfile.mkdtemp(prefix="edo-vllm-group-")) / "snapshot"
             print(f"Freezing vLLM group root={api['pid']} CUDA_PIDs={cuda_pids}", flush=True)
             subprocess.run(
-                ["sudo", args.edo, "freeze-group", str(api["pid"]), cuda_pids, str(snapshot)],
+                ["sudo", "--preserve-env=EDO_CRIU", args.edo, "freeze-group",
+                 str(api["pid"]), cuda_pids, str(snapshot)],
                 check=True,
             )
-            subprocess.run(["sudo", args.edo, "summon-group", str(snapshot)], check=True)
+            # CRIU restores the recorded numeric PIDs.  The dumped instance
+            # must therefore be fully reaped before summon-group starts.
+            os.killpg(server.pid, signal.SIGTERM)
+            try:
+                server.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(server.pid, signal.SIGKILL)
+                server.wait()
+            restore_started = time.monotonic()
+            preserved_env = "EDO_CRIU"
+            if args.io_uring_restore:
+                preserved_env += ",EDO_IO_URING_RESTORE"
+            summon_command = [
+                "sudo", f"--preserve-env={preserved_env}", args.edo,
+                "summon-group", str(snapshot)
+            ]
+            if args.fast_restore:
+                summon_command.append("--skip-integrity")
+            restore_env = os.environ.copy()
+            if args.io_uring_restore:
+                restore_env["EDO_IO_URING_RESTORE"] = "1"
+            subprocess.run(
+                summon_command,
+                check=True,
+                env=restore_env,
+            )
+            if args.release_kv_cache:
+                wake_started = time.monotonic()
+                # Rehydrate weights first, then recreate the discarded KV
+                # backing as empty GPU memory.  Keeping these as two calls is
+                # important: a single wake_up() would hide whether the
+                # checkpoint actually excluded KV pages.
+                post_empty(base, "/wake_up?tags=weights")
+                post_empty(base, "/wake_up?tags=kv_cache")
+                wait_sleeping(base, False, args.startup_timeout)
+                print(
+                    "Dynamo-style staged wake (weights + fresh KV cache): "
+                    f"{time.monotonic() - wake_started:.3f}s"
+                )
             wait_ready(base, args.startup_timeout)
-            after = warmup(base, args.model)
+            restore_ready_seconds = time.monotonic() - restore_started
+            after, restore_warmup_seconds = timed_warmup(base, args.model)
+            print(f"restore to /health: {restore_ready_seconds:.3f}s")
+            print(f"post-restore warmup request latency: {restore_warmup_seconds:.3f}s")
+            print(f"restore to warm inference: {time.monotonic() - restore_started:.3f}s")
+            _, restore_ttft_seconds = timed_ttft(base, args.model)
+            print(f"post-restore TTFT: {restore_ttft_seconds:.3f}s")
+            print(f"TTFT delta: {restore_ttft_seconds - cold_ttft_seconds:+.3f}s")
             print("post-restore warmup inference:", json.dumps(after, sort_keys=True))
             print("vLLM group restore passed")
         return 0
@@ -184,9 +333,31 @@ def main() -> int:
     parser.add_argument("--inspect-only", action="store_true")
     parser.add_argument("--pid", type=int, help="vLLM API process PID for --inspect-only")
     parser.add_argument("--full-snapshot", action="store_true", help="run the destructive Edo group freeze/restore test")
+    parser.add_argument(
+        "--fast-restore",
+        action="store_true",
+        help="skip large image SHA-256 reads during restore (trusted local snapshots only)",
+    )
+    parser.add_argument(
+        "--release-kv-cache",
+        action="store_true",
+        help="release vLLM KV-cache backing before snapshot and wake it after restore",
+    )
+    parser.add_argument(
+        "--sleep-level",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="vLLM sleep level used before checkpoint (level 2 discards weights too)",
+    )
     parser.add_argument("--edo", default=os.environ.get("EDO_BIN", "target/debug/edo"))
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.12)
     parser.add_argument("--max-model-len", type=int, default=1024)
+    parser.add_argument(
+        "--kv-cache-memory-bytes",
+        type=int,
+        help="explicit per-GPU KV-cache budget; useful for bounded snapshot artifacts",
+    )
     parser.add_argument(
         "--enforce-eager",
         action="store_true",
@@ -196,6 +367,21 @@ def main() -> int:
         "--no-async-scheduling",
         action="store_true",
         help="disable vLLM async scheduling to avoid CRIU-unsupported io_uring state",
+    )
+    parser.add_argument(
+        "--cudagraph-capture-sizes",
+        nargs="+",
+        type=int,
+        help="CUDA graph capture sizes, e.g. '1' to minimize graph state",
+    )
+    parser.add_argument(
+        "--compilation-config",
+        help="vLLM compilation JSON, e.g. '{\"cudagraph_mode\":\"FULL\"}'",
+    )
+    parser.add_argument(
+        "--io-uring-restore",
+        action="store_true",
+        help="opt into buffered io_uring page restore (experimental)",
     )
     return run(parser.parse_args())
 

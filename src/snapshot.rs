@@ -6,6 +6,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::Command,
+    time::Instant,
 };
 
 use crate::process::ProcessRecord;
@@ -137,6 +138,14 @@ pub fn require_group_kind(manifest: &SnapshotManifest) -> Result<()> {
 }
 
 pub fn verify(directory: &Path, manifest: &SnapshotManifest) -> Result<()> {
+    verify_with_options(directory, manifest, true)
+}
+
+pub fn verify_with_options(
+    directory: &Path,
+    manifest: &SnapshotManifest,
+    check_integrity: bool,
+) -> Result<()> {
     if manifest.schema_version != 2 {
         bail!(
             "unsupported snapshot schema {}; expected 2",
@@ -187,9 +196,11 @@ pub fn verify(directory: &Path, manifest: &SnapshotManifest) -> Result<()> {
         if metadata.len() != expected.size {
             bail!("snapshot file size changed: {}", expected.path);
         }
-        let actual = sha256_file(&path)?;
-        if actual != expected.sha256 {
-            bail!("snapshot integrity check failed: {}", expected.path);
+        if check_integrity {
+            let actual = sha256_file(&path)?;
+            if actual != expected.sha256 {
+                bail!("snapshot integrity check failed: {}", expected.path);
+            }
         }
     }
     Ok(())
@@ -252,21 +263,35 @@ fn snapshot_files(directory: &Path) -> Result<Vec<SnapshotFile>> {
         paths.push(path);
     }
     paths.sort();
-    paths
-        .into_iter()
-        .map(|path| {
-            let metadata = fs::metadata(&path)?;
-            Ok(SnapshotFile {
-                path: path
-                    .strip_prefix(directory)
-                    .map_err(|error| anyhow!(error))?
-                    .to_string_lossy()
-                    .into_owned(),
-                size: metadata.len(),
-                sha256: sha256_file(&path)?,
-            })
-        })
-        .collect()
+    let started = Instant::now();
+    let total = paths.len();
+    let mut files = Vec::with_capacity(total);
+    for (index, path) in paths.into_iter().enumerate() {
+        let metadata = fs::metadata(&path)?;
+        eprintln!(
+            "snapshot manifest: hashing {}/{} {} ({} bytes)",
+            index + 1,
+            total,
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            metadata.len()
+        );
+        files.push(SnapshotFile {
+            path: path
+                .strip_prefix(directory)
+                .map_err(|error| anyhow!(error))?
+                .to_string_lossy()
+                .into_owned(),
+            size: metadata.len(),
+            sha256: sha256_file(&path)?,
+        });
+        eprintln!(
+            "snapshot manifest: hashed {}/{} in {:.1}s",
+            index + 1,
+            total,
+            started.elapsed().as_secs_f32()
+        );
+    }
+    Ok(files)
 }
 
 fn sha256_file(path: &Path) -> Result<String> {

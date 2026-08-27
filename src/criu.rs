@@ -1,6 +1,28 @@
 use anyhow::{anyhow, Context, Result};
 use std::{fs, path::Path, process::Command};
 
+fn criu_program() -> std::ffi::OsString {
+    std::env::var_os("EDO_CRIU").unwrap_or_else(|| "criu".into())
+}
+
+fn clear_link_remap_artifacts() {
+    // CRIU creates these host-side names for deleted shared-memory objects.
+    // A failed dump can leave one behind and make the next dump fail with
+    // EEXIST. They contain no process state and are safe to remove before a
+    // new dump; restrict cleanup to CRIU's exact generated prefix.
+    if let Ok(entries) = fs::read_dir("/dev/shm") {
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("link_remap.")
+            {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
 pub fn dump(pid: u32, directory: &Path) -> Result<()> {
     dump_inner(pid, directory, &[])
 }
@@ -12,7 +34,8 @@ pub fn dump_group(pid: u32, directory: &Path) -> Result<()> {
 
 fn dump_inner(pid: u32, directory: &Path, skipped_mounts: &[String]) -> Result<()> {
     prepare_directory(directory)?;
-    let mut command = Command::new("criu");
+    clear_link_remap_artifacts();
+    let mut command = Command::new(criu_program());
     command
         .arg("dump")
         .arg("-t")
@@ -82,21 +105,26 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
 
 pub fn restore(directory: &Path) -> Result<()> {
     let pidfile = directory.join("restored.pid");
-    run(
-        Command::new("criu")
-            .arg("restore")
-            .arg("--images-dir")
-            .arg(directory)
-            .arg("--restore-detached")
-            .arg("--shell-job")
-            .arg("--tcp-established")
-            .arg("--pidfile")
-            .arg(&pidfile)
-            .arg("--log-file")
-            .arg(directory.join("restore.log"))
-            .arg("--verbosity=4"),
-        "CRIU restore",
-    )
+    let mut command = Command::new(criu_program());
+    command
+        .arg("restore")
+        .arg("--images-dir")
+        .arg(directory)
+        .arg("--restore-detached")
+        .arg("--shell-job")
+        .arg("--tcp-established")
+        // Give the CRIU fork a bounded worker budget for decompression and
+        // direct-page paths; buffered restore remains the host default.
+        // Upstream CRIU accepts this option too; the fork applies it to
+        // both compressed work and independent raw page batches.
+        .arg("--decompress-threads")
+        .arg("16")
+        .arg("--pidfile")
+        .arg(&pidfile)
+        .arg("--log-file")
+        .arg(directory.join("restore.log"))
+        .arg("--verbosity=4");
+    run(&mut command, "CRIU restore")
 }
 
 fn prepare_directory(directory: &Path) -> Result<()> {

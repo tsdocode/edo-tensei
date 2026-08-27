@@ -13,6 +13,8 @@ use cli::{Cli, Command};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
+    thread,
     time::Duration,
 };
 
@@ -56,11 +58,13 @@ fn main() -> Result<()> {
         Command::Summon {
             snapshot,
             timeout_ms,
-        } => summon(&snapshot, timeout_ms),
+            skip_integrity,
+        } => summon(&snapshot, timeout_ms, skip_integrity),
         Command::SummonGroup {
             snapshot,
             timeout_ms,
-        } => summon_group(&snapshot, timeout_ms),
+            skip_integrity,
+        } => summon_group(&snapshot, timeout_ms, skip_integrity),
     }
 }
 
@@ -164,10 +168,10 @@ fn freeze(
     Ok(())
 }
 
-fn summon(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
+fn summon(snapshot_directory: &str, timeout_ms: u64, skip_integrity: bool) -> Result<()> {
     let directory = PathBuf::from(snapshot_directory);
     let manifest = snapshot::read(&directory)?;
-    snapshot::verify(&directory, &manifest)?;
+    snapshot::verify_with_options(&directory, &manifest, !skip_integrity)?;
     snapshot::require_cuda_kind(&manifest)?;
     criu::restore(&directory)?;
     let restored_pid: i32 = fs::read_to_string(directory.join("restored.pid"))?
@@ -219,6 +223,10 @@ fn freeze_group(
     let timeout = Duration::from_millis(timeout_ms);
     let poll = Duration::from_millis(25);
     for record in &cuda_records {
+        eprintln!(
+            "freeze-group: waiting for CUDA PID {} to become RUNNING",
+            record.pid
+        );
         cuda.wait_for_state(
             record.pid as i32,
             cuda::ProcessState::Running,
@@ -228,10 +236,18 @@ fn freeze_group(
     }
     let mut locked = Vec::new();
     for record in &cuda_records {
+        eprintln!(
+            "freeze-group: locking CUDA PID {} (timeout={}ms)",
+            record.pid, lock_timeout_ms
+        );
         if let Err(error) = cuda.lock(record.pid as i32, lock_timeout_ms) {
             let _ = recover_many(&cuda, &locked, timeout, poll);
             return Err(error).context(format!("CUDA group lock failed for PID {}", record.pid));
         }
+        eprintln!(
+            "freeze-group: CUDA PID {} lock returned; waiting for LOCKED",
+            record.pid
+        );
         if let Err(error) =
             cuda.wait_for_state(record.pid as i32, cuda::ProcessState::Locked, timeout, poll)
         {
@@ -244,6 +260,7 @@ fn freeze_group(
         locked.push(record.pid as i32);
     }
     for record in &cuda_records {
+        eprintln!("freeze-group: checkpointing CUDA PID {}", record.pid);
         if let Err(error) = cuda.checkpoint(record.pid as i32) {
             let _ = recover_many(&cuda, &locked, timeout, poll);
             return Err(error).context(format!(
@@ -251,6 +268,10 @@ fn freeze_group(
                 record.pid
             ));
         }
+        eprintln!(
+            "freeze-group: CUDA PID {} checkpoint returned; waiting for CHECKPOINTED",
+            record.pid
+        );
         if let Err(error) = cuda.wait_for_state(
             record.pid as i32,
             cuda::ProcessState::Checkpointed,
@@ -277,12 +298,20 @@ fn freeze_group(
     Ok(())
 }
 
-fn summon_group(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
+fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool) -> Result<()> {
+    let summon_started = std::time::Instant::now();
     let directory = PathBuf::from(snapshot_directory);
     let manifest = snapshot::read(&directory)?;
-    snapshot::verify(&directory, &manifest)?;
+    snapshot::verify_with_options(&directory, &manifest, !skip_integrity)?;
     snapshot::require_group_kind(&manifest)?;
+    // Load/initialize the driver before CRIU starts. This work is independent
+    // of the restored target processes and avoids adding it to the serving
+    // critical path after CRIU resumes them.
+    let cuda = Arc::new(cuda::CudaCheckpoint::load()?);
+    cuda.initialize()?;
+    let cuda_initialized = summon_started.elapsed();
     criu::restore(&directory)?;
+    let criu_restored = summon_started.elapsed();
     let restored_root: u32 = fs::read_to_string(directory.join("restored.pid"))?
         .trim()
         .parse()?;
@@ -303,23 +332,56 @@ fn summon_group(snapshot_directory: &str, timeout_ms: u64) -> Result<()> {
         used.insert(match_record.pid);
         restored_pids.push(match_record.pid as i32);
     }
-    let cuda = cuda::CudaCheckpoint::load()?;
-    cuda.initialize()?;
-    let timeout = Duration::from_millis(timeout_ms);
-    let poll = Duration::from_millis(25);
-    for pid in &restored_pids {
-        cuda.restore(*pid)?;
-        cuda.wait_for_state(*pid, cuda::ProcessState::Locked, timeout, poll)?;
-    }
-    for pid in &restored_pids {
-        cuda.unlock(*pid)?;
-        cuda.wait_for_state(*pid, cuda::ProcessState::Running, timeout, poll)?;
-    }
+    parallel_cuda_calls(&cuda, &restored_pids, "restore", |cuda, pid| {
+        cuda.restore(pid)
+    })?;
+    let cuda_restored = summon_started.elapsed();
+    parallel_cuda_calls(&cuda, &restored_pids, "unlock", |cuda, pid| {
+        cuda.unlock(pid)
+    })?;
+    let cuda_unlocked = summon_started.elapsed();
+    eprintln!(
+        "summon-group timing: CUDA init {:.3}s, CRIU restore {:.3}s, CUDA restore {:.3}s, CUDA unlock {:.3}s",
+        cuda_initialized.as_secs_f64(),
+        criu_restored.as_secs_f64(),
+        cuda_restored.as_secs_f64(),
+        cuda_unlocked.as_secs_f64(),
+    );
     println!(
         "CUDA+CRIU process group resumed: root PID {} workers {}",
         restored_root,
         restored_pids.len()
     );
+    Ok(())
+}
+
+fn parallel_cuda_calls<F>(
+    cuda: &Arc<cuda::CudaCheckpoint>,
+    pids: &[i32],
+    operation: &'static str,
+    call: F,
+) -> Result<()>
+where
+    F: Fn(&cuda::CudaCheckpoint, i32) -> Result<()> + Send + Sync + 'static,
+{
+    let call = Arc::new(call);
+    let handles = pids
+        .iter()
+        .copied()
+        .map(|pid| {
+            let cuda = Arc::clone(cuda);
+            let call = Arc::clone(&call);
+            thread::spawn(move || {
+                call(&cuda, pid).with_context(|| format!("CUDA {operation} failed for PID {pid}"))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for handle in handles {
+        handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("CUDA {operation} worker panicked"))??;
+    }
     Ok(())
 }
 

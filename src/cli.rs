@@ -85,11 +85,17 @@ pub enum Command {
         snapshot: String,
         #[arg(long, default_value_t = 10_000)]
         timeout_ms: u64,
+        /// Skip per-image SHA-256 verification for a trusted local snapshot.
+        #[arg(long)]
+        skip_integrity: bool,
     },
     /// Restore a CUDA+CRIU process group and resume every recorded CUDA worker.
     SummonGroup {
         snapshot: String,
         #[arg(long, default_value_t = 10_000)]
         timeout_ms: u64,
+        /// Skip per-image SHA-256 verification for a trusted local snapshot.
+        #[arg(long)]
+        skip_integrity: bool,
     },
 }

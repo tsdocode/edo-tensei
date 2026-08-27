@@ -81,6 +81,13 @@ pub struct CudaCheckpoint {
     unlock: CuUnlock,
 }
 
+// The loaded library is kept alive by the owning CudaCheckpoint, while all
+// symbols are immutable function pointers. CUDA's process-checkpoint API is
+// process-ID based, so independent owner PIDs can be driven concurrently.
+// The group restore path uses this only after the object is fully initialized.
+unsafe impl Send for CudaCheckpoint {}
+unsafe impl Sync for CudaCheckpoint {}
+
 impl CudaCheckpoint {
     pub fn load() -> Result<Self> {
         let library = unsafe {
