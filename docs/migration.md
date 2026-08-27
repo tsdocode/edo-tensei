@@ -11,6 +11,6 @@ The old implementation paths were merged into the progressive examples. Existing
 | `examples/vllm-snapshot` | `examples/04_vllm_resume` |
 | `examples/cuda-checkpoint` | `examples/05_cuda_restore` |
 | `examples/triton-snapshot` | `examples/06_triton_snapshot` |
-| `kubernetes/*` | `examples/07_kubernetes_migration` + `kubernetes/` |
+| `examples/08_kubernetes_migration/*` | Kubernetes DaemonSet agent, manifests, and restore walkthrough |
 
 The old paths are implementation-oriented compatibility entry points. New demos use the product vocabulary: resume a process, resume a service, warm-start a model, and migrate a workload.

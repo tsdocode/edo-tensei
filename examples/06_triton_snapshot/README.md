@@ -48,4 +48,4 @@ Native Docker namespace restoration is not complete. Stop the container with `Ct
 docker ps --filter ancestor=nvcr.io/nvidia/tritonserver:25.05-py3 --format '{{.ID}}' | xargs -r docker stop
 ```
 
-Next: [07 · Kubernetes migration](../07_kubernetes_migration/README.md).
+Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).
