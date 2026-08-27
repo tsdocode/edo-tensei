@@ -1,19 +1,16 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: edo-gpu-workload
+  name: edo-gpu-restore-placeholder
   namespace: edo-system
-  labels:
-    app: edo-gpu-workload
 spec:
   restartPolicy: Never
   runtimeClassName: nvidia
   containers:
-    - name: workload
+    - name: placeholder
       image: edo-gpu-workload:test
       imagePullPolicy: IfNotPresent
-      command: ["/bin/sh", "-c"]
-      args: ["/usr/local/bin/gpu-workload & wait"]
+      command: ["/usr/bin/tail", "-f", "/dev/null"]
       volumeMounts:
         - name: edo-binaries
           mountPath: /opt/edo/bin
@@ -31,11 +28,11 @@ spec:
       hostPath:
         path: /opt/edo/bin
         type: Directory
-    - name: snapshots
-      hostPath:
-        path: /var/lib/edo-snapshots
-        type: DirectoryOrCreate
     - name: edo-libraries
       hostPath:
         path: /opt/edo/lib
+        type: Directory
+    - name: snapshots
+      hostPath:
+        path: /var/lib/edo-snapshots
         type: Directory

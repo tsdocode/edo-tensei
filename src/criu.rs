@@ -43,10 +43,19 @@ fn dump_inner(pid: u32, directory: &Path, skipped_mounts: &[String]) -> Result<(
         .arg("--images-dir")
         .arg(directory)
         .arg("--shell-job")
+        // A namespace-entered Kubernetes agent must not wait for PID 1 to
+        // exit after dumping. The runtime owns that init process; keep the
+        // checkpoint source alive and let Edo restore/unlock CUDA below.
+        .arg("--leave-running")
         // Recreate unlinked POSIX shared-memory/semaphore mappings.
         .arg("--link-remap")
         // Preserve accepted TCP connections owned by the server.
         .arg("--tcp-established")
+        // Kubernetes owns the target cgroup hierarchy. Dumping its cgroup
+        // properties from a namespace-entered agent can block after CRIU has
+        // already written the process images, so leave cgroup recreation to
+        // the runtime and only checkpoint the process state.
+        .arg("--manage-cgroups=ignore")
         // vLLM mounts rebuildable compilation/model caches into /root/.cache.
         // They are host-side artifacts, not process state, and CRIU cannot
         // checkpoint these bind mounts when their source is outside the
@@ -112,6 +121,9 @@ pub fn restore(directory: &Path) -> Result<()> {
         .arg(directory)
         .arg("--restore-detached")
         .arg("--shell-job")
+        // The destination Pod has a different runtime-generated cgroup path;
+        // Kubernetes remains responsible for placing restored processes.
+        .arg("--manage-cgroups=ignore")
         .arg("--tcp-established")
         // Give the CRIU fork a bounded worker budget for decompression and
         // direct-page paths; buffered restore remains the host default.

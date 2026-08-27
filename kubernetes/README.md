@@ -47,11 +47,18 @@ docker save edo-snapshot-agent:test edo-gpu-workload:test | sudo k3s ctr images 
 sudo k3s kubectl apply -f kubernetes/gpu-workload-pod.yaml
 ```
 
-The first k3s run reached CUDA `CHECKPOINTED` and wrote approximately 800 MiB
-of CRIU pages. The current failure is after that point: the CRIU fork hangs
-after `Unfreezing tasks` while dumping the container's PID 1. Therefore the
-Kubernetes dump/restore path remains experimental and is not yet reported as
-passing.
+The validated k3s run uses CRIU live-checkpoint mode and a placeholder Pod on
+restore. Dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed
+the source process. After replacing the source with a PID-1-only placeholder,
+restore recreated the CUDA process and unlocked it successfully. The measured
+restore was 17.35s (CUDA initialization 16.59s, CRIU restore 0.47s, CUDA
+restore/unlock 0.29s) for this minimal 256 MiB fixture. The slower CUDA init is
+driver initialization in a fresh placeholder Pod; it is separate from CRIU
+memory restore.
+
+The required Kubernetes behavior is therefore proven for this fixture. Model
+servers still need a controller to create the placeholder, map container PIDs,
+and run health/inference readiness checks before advertising service readiness.
 
 Build the agent image and publish it to a registry reachable by every GPU node:
 

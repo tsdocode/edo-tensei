@@ -290,6 +290,12 @@ fn freeze_group(
         let _ = recover_many(&cuda, &locked, timeout, poll);
         return Err(error).context("CRIU group dump failed; CUDA recovery was attempted");
     }
+    // Group dumps use CRIU's live-checkpoint mode so a Kubernetes container
+    // init process is not reaped by the node-local agent. Resume the original
+    // CUDA processes after the checkpoint has been materialized.
+    if let Err(error) = recover_many(&cuda, &locked, timeout, poll) {
+        return Err(error).context("CUDA recovery failed after CRIU group dump");
+    }
     snapshot::write_group(&directory, &root, "cuda-criu-group", cuda_records)?;
     println!(
         "CUDA+CRIU process-group snapshot ready: {}",

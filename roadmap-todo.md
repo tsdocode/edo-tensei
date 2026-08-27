@@ -597,11 +597,13 @@ source process was modified.
   scope; controller/CRI discovery and cross-node storage remain open.
 - [x] Install a local k3s cluster and validate NVIDIA runtime integration with
   the device plugin and a CUDA smoke-test Pod (H100, CUDA 12.8).
-- [ ] **P1 / NEXT** Run the Edo snapshot agent inside k3s against a real GPU
-  workload, including container-aware dump/restore and readiness validation.
-  The first run reached CUDA `CHECKPOINTED` and wrote CRIU pages, but the
-  CRIU fork hung after `Unfreezing tasks` while dumping the container PID 1;
-  restore/readiness are still blocked.
+- [x] Run the Edo snapshot agent inside k3s against a real GPU workload. Live
+  dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed the
+  source process; restore into a PID-1-only placeholder recreated and unlocked
+  the CUDA process. Restore was 17.35s for the 256 MiB fixture (CUDA init
+  16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
+  probes around this validated same-node snapshot/restore path.
 
 ### Gate 1 — after Phase 2
 
