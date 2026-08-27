@@ -174,7 +174,24 @@ pub fn restore(directory: &Path) -> Result<()> {
             command.args(["--join-ns", "uts:/proc/1/ns/uts"]);
         }
     }
-    run(&mut command, "CRIU restore")
+    let result = run(&mut command, "CRIU restore");
+    if result.is_err() {
+        if let Ok(log) = fs::read_to_string(directory.join("restore.log")) {
+            let tail = log
+                .lines()
+                .rev()
+                .take(40)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !tail.is_empty() {
+                return result.context(format!("CRIU restore log:\n{tail}"));
+            }
+        }
+    }
+    result
 }
 
 fn prepare_directory(directory: &Path) -> Result<()> {
