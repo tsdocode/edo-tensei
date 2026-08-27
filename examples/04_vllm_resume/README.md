@@ -19,14 +19,19 @@ EDO_VLLM_COMMAND=/path/to/vllm \
 
 ## Architecture, step by step
 
-```text
-API parent ─┐                         ┌─ CRIU process images
-            ├─ warm-up + CUDA graphs ─┤
-EngineCore ─┘                         └─ CRIU fork io_uring support
-                 ↓ freeze-group
-          CUDA lock → CUDA checkpoint → CRIU dump
-                 ↓ summon-group
-          CRIU restore → CUDA restore → readiness → completion
+```mermaid
+flowchart LR
+    A[API parent] --> C[Warm-up + CUDA graphs]
+    B[VLLM::EngineCore] --> C
+    C --> D[freeze-group]
+    D --> E[CUDA lock]
+    E --> F[CUDA checkpoint]
+    F --> G[CRIU dump + io_uring images]
+    G --> H[summon-group]
+    H --> I[CRIU restore]
+    I --> J[CUDA restore]
+    J --> K[Readiness]
+    K --> L[Completion without reload]
 ```
 
 1. The adapter starts vLLM with tensor parallel size 1 and waits for `/health`.
@@ -48,6 +53,14 @@ Validated Qwen3-0.6B async run:
 | Completion | valid | valid |
 
 The measured run also reported streaming TTFT of 0.040s before and 0.017s after restore. Results depend heavily on checkpoint image size, hashing mode, KV budget, and storage.
+
+```mermaid
+xychart-beta
+    title "vLLM time to ready (seconds; lower is better)"
+    x-axis [Cold, Restore]
+    y-axis "seconds" 0 --> 32
+    bar [30.046, 3.368]
+```
 
 ## What is checkpointed?
 

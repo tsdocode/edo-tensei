@@ -20,14 +20,19 @@ EDO_MODEL_PYTHON=/path/to/python \
 
 ## Architecture, step by step
 
-```text
-Python + Transformers
-       ↓ model load (once)
-       ↓ CUDA transfer + warm-up
-       ↓ checksum before
-edo freeze: CUDA lock → CUDA checkpoint → CRIU dump
-edo summon: CRIU restore → CUDA restore → unlock
-       ↓ checksum after + inference
+```mermaid
+flowchart TD
+    A[Python + Transformers] --> B[Load model once]
+    B --> C[CUDA transfer + warm-up]
+    C --> D[Checksum before]
+    D --> E[edo freeze]
+    E --> F[CUDA lock]
+    F --> G[CUDA checkpoint]
+    G --> H[CRIU dump]
+    H --> I[CRIU restore]
+    I --> J[CUDA restore]
+    J --> K[Unlock]
+    K --> L[Checksum after + inference]
 ```
 
 1. `model.py` loads the selected model and writes a startup marker.

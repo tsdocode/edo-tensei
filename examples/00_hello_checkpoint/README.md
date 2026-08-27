@@ -18,12 +18,16 @@ Or run the script directly:
 
 ## Architecture, step by step
 
-```text
-run.sh → edo run → workload.py
-                    ├─ warm-up + signal request
-                    ├─ edo cpu-dump → CRIU image
-                    ├─ kill original process
-                    └─ edo cpu-restore → request succeeds
+```mermaid
+flowchart LR
+    A[run.sh] --> B[edo run]
+    B --> C[workload.py]
+    C --> D[Warm-up and request #1]
+    D --> E[edo cpu-dump]
+    E --> F[CRIU image]
+    F --> G[Kill original process]
+    G --> H[edo cpu-restore]
+    H --> I[Request #2 succeeds]
 ```
 
 1. `workload.py` sleeps during startup, writes a warm-up event, and exposes its PID through a readiness file.
@@ -44,6 +48,14 @@ The latest local run measured:
 | State after restore | request accepted |
 
 Timings vary by host. The authoritative report is written to `.edo/runs/*-resume.json`.
+
+```mermaid
+xychart-beta
+    title "CPU resume latency (seconds; lower is better)"
+    x-axis [Cold, Restore]
+    y-axis "seconds" 0 --> 2.2
+    bar [2.102, 0.164]
+```
 
 ## What is checkpointed?
 

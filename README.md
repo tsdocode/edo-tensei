@@ -58,8 +58,12 @@ cargo run -- demo resume
 
 ## What just happened?
 
-```text
-warm workload → checkpoint → process failure → restore → request succeeds
+```mermaid
+flowchart LR
+    A[Warm workload] --> B[Checkpoint]
+    B --> C[Process failure]
+    C --> D[Restore]
+    D --> E[Request succeeds]
 ```
 
 CRIU restored the process memory, counter, signal handlers, open report file, and execution context. The JSON report is local and disposable; checkpoint images are never committed.

@@ -18,16 +18,18 @@ EDO_MODEL_MB=512 ./examples/05_cuda_restore/run-model-demo.sh
 
 ## Architecture, step by step
 
-```text
-native CUDA fixture
-       ↓ cuMemAlloc + deterministic pattern
-       ↓ signal verifies GPU pattern
-edo freeze
-       ├─ CUDA lock → checkpoint (GPU state held by driver)
-       └─ CRIU dump (CPU process state)
-edo summon
-       ├─ CRIU restore
-       └─ CUDA restore → unlock → signal verifies pattern
+```mermaid
+flowchart TD
+    A[Native CUDA fixture] --> B[cuMemAlloc + deterministic pattern]
+    B --> C[Signal verifies GPU pattern]
+    C --> D[edo freeze]
+    D --> E[CUDA lock + checkpoint]
+    D --> F[CRIU dump: CPU process state]
+    E --> G[edo summon]
+    F --> G
+    G --> H[CRIU restore]
+    H --> I[CUDA restore + unlock]
+    I --> J[Signal verifies pattern]
 ```
 
 1. The fixture creates a CUDA context and writes a deterministic allocation.
@@ -49,6 +51,14 @@ Validated 512 MiB model-sized allocation on H100/CUDA 12.8:
 | Verification | pattern valid | pattern valid |
 
 The scripts print the exact values for the current host. The model-sized fixture is a CUDA allocation proof, not a PyTorch or vLLM benchmark.
+
+```mermaid
+xychart-beta
+    title "CUDA operation timing (seconds)"
+    x-axis [Freeze, Restore]
+    y-axis "seconds" 0 --> 2.2
+    bar [2.043, 1.534]
+```
 
 ## What is checkpointed?
 

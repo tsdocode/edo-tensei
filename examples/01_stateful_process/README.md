@@ -14,13 +14,14 @@ The demo uses the same checkpoint engine as example 00 but gives the workload a 
 
 ## Architecture, step by step
 
-```text
-counter.py + event log
-       ↓ warm-up (4 s)
-       ↓ request #1
-       ↓ CRIU dump + explicit process failure
-       ↓ CRIU restore
-       ↓ request #2 on restored PID
+```mermaid
+flowchart TD
+    A[counter.py + event log] --> B[Warm-up: 4 seconds]
+    B --> C[Request #1]
+    C --> D[CRIU dump]
+    D --> E[Explicit source process failure]
+    E --> F[CRIU restore]
+    F --> G[Request #2 on restored PID]
 ```
 
 1. `run.sh` starts the stateful fixture through the managed `edo run` lifecycle.
