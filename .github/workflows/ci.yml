@@ -23,7 +23,9 @@ jobs:
           path: target/release/edo
 
   cpu-demo:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 runner images currently do not publish a CRIU apt package;
+    # keep the real CPU smoke test on the compatible LTS image.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
