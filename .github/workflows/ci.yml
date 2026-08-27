@@ -23,8 +23,8 @@ jobs:
           path: target/release/edo
 
   cpu-demo:
-    # Ubuntu 24.04 runner images currently do not publish a CRIU apt package;
-    # keep the real CPU smoke test on the compatible LTS image.
+    # Build a recent CRIU because Ubuntu 22.04's packaged CRIU can segfault
+    # while restoring Python workloads on the hosted runner kernel.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,26 @@ jobs:
       - name: Install CRIU
         run: |
           sudo apt-get update
-          sudo apt-get install -y criu
+          sudo apt-get install -y \
+            asciidoc \
+            build-essential \
+            git \
+            iproute2 \
+            libcap-dev \
+            libgnutls28-dev \
+            libnet1-dev \
+            libnl-3-dev \
+            libnl-route-3-dev \
+            libprotobuf-c-dev \
+            libprotobuf-dev \
+            libunwind-dev \
+            protobuf-c-compiler \
+            protobuf-compiler \
+            python3-protobuf
+          git clone --depth 1 --branch v4.2.1 https://github.com/checkpoint-restore/criu.git "$RUNNER_TEMP/criu"
+          make -C "$RUNNER_TEMP/criu" -j2
+          sudo make -C "$RUNNER_TEMP/criu" install
+          criu --version
       - name: Validate demo scripts
         run: |
           bash tests/validate-demos.sh
