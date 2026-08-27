@@ -120,6 +120,7 @@ fn vllm_mounts(pid: u32) -> Vec<String> {
 
 pub fn restore(directory: &Path) -> Result<()> {
     let pidfile = directory.join("restored.pid");
+    let entered_mount_namespace = std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some();
     let mut command = if let Some(pid) = std::env::var_os("EDO_RESTORE_MOUNT_PID") {
         let mut command = Command::new("nsenter");
         command.args([
@@ -149,13 +150,17 @@ pub fn restore(directory: &Path) -> Result<()> {
         // The destination is a runtime-created container mount tree.  The
         // compatibility mount engine is less aggressive about replaying
         // runtime-owned overlay/bind mounts than mount-v2 here.
-        .arg("--mntns-compat-mode")
         .arg("--tcp-established")
         .arg("--pidfile")
         .arg(&pidfile)
         .arg("--log-file")
         .arg(directory.join("restore.log"))
         .arg("--verbosity=4");
+    if entered_mount_namespace {
+        // This option is only needed when restoring into a runtime-owned
+        // container mount namespace and is absent from older distro CRIU.
+        command.arg("--mntns-compat-mode");
+    }
     if let Some(pid) = std::env::var_os("EDO_RESTORE_NET_PID") {
         let net_path = if std::env::var_os("EDO_RESTORE_MOUNT_PID").is_some() {
             // CRIU is launched inside the placeholder mount namespace, whose
