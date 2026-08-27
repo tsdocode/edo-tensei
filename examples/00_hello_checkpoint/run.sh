@@ -3,14 +3,15 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 binary="$repo_root/target/debug/edo"
-name="edo-resume-demo-$$"
+demo_name="${EDO_DEMO_NAME:-resume}"
+name="edo-${demo_name}-$$"
 parent=$(mktemp -d /tmp/edo-resume-demo.XXXXXX)
 snapshot="$parent/checkpoint"
 events="$parent/events.jsonl"
 ready="$parent/ready"
 launch_log="$parent/launch.log"
 report_dir="$repo_root/.edo/runs"
-report="$report_dir/$(date -u +%Y-%m-%dT%H-%M-%SZ)-resume.json"
+report="$report_dir/$(date -u +%Y-%m-%dT%H-%M-%SZ)-${demo_name}.json"
 start_ns=$(date +%s%N)
 
 cleanup() {
@@ -26,9 +27,10 @@ cd "$repo_root"
 mkdir -p "$report_dir"
 cargo build --quiet
 
-echo "Edo Tensei — Resume a warm workload"
+echo "Edo Tensei — Resume a warm workload (${demo_name})"
 "$binary" run --name "$name" -- setsid env \
     EDO_DEMO_REPORT="$events" EDO_DEMO_READY="$ready" \
+    EDO_DEMO_STARTUP_SECONDS="${EDO_DEMO_STARTUP_SECONDS:-2}" \
     python3 examples/00_hello_checkpoint/workload.py >"$launch_log" 2>&1
 for _ in $(seq 1 100); do [ -f "$ready" ] && break; sleep 0.1; done
 test -f "$ready"
@@ -70,15 +72,15 @@ test "$(rg -c '"request"' "$events")" -ge 2
 echo "✓ Restored successfully"
 echo "✓ Request completed after restore"
 
-python3 - "$report" "$start_ns" "$cold_end_ns" "$checkpoint_start_ns" "$checkpoint_end_ns" "$restore_start_ns" "$restore_end_ns" "$snapshot" <<'PY'
+python3 - "$report" "$start_ns" "$cold_end_ns" "$checkpoint_start_ns" "$checkpoint_end_ns" "$restore_start_ns" "$restore_end_ns" "$snapshot" "$demo_name" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-output, start, cold_end, checkpoint_start, checkpoint_end, restore_start, restore_end, snapshot = sys.argv[1:]
+output, start, cold_end, checkpoint_start, checkpoint_end, restore_start, restore_end, snapshot, demo_name = sys.argv[1:]
 report = {
     "schema_version": 1,
-    "demo": "resume",
+    "demo": demo_name,
     "platform": "cpu",
     "measured": True,
     "cold_start_ms": (int(cold_end) - int(start)) / 1_000_000,

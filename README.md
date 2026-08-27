@@ -2,6 +2,30 @@
 
 Edo Tensei checkpoints live AI workloads and restores them with their runtime state intact — from Python processes to PyTorch and vLLM servers.
 
+> Warm it once. Freeze it. Let it disappear. Bring it back ready to serve.
+
+![Edo Tensei architecture](assets/architecture.svg)
+
+## The wow moment: restore beats cold start
+
+These are measured runs, not promises. The CPU row is produced by the first-run demo on this repository's development host; the vLLM row is the validated Qwen3-0.6B single-GPU run documented in the roadmap.
+
+| Workload | Cold start → ready | Restore → ready | Observed improvement |
+| --- | ---: | ---: | ---: |
+| Stateful CPU process | 2.102 s | 0.164 s | **12.8× faster** |
+| Qwen3-0.6B + vLLM | 30.046 s | 3.368 s | **8.9× faster** |
+
+```mermaid
+xychart-beta
+    title "Time to ready (seconds; lower is better)"
+    x-axis [CPU, vLLM]
+    y-axis "seconds" 0 --> 32
+    bar [2.102, 30.046]
+    bar [0.164, 3.368]
+```
+
+The first bar in each pair is cold start; the second is restore. Exact numbers vary with the host, model, image storage, integrity verification, and runtime configuration. See the [full benchmark report](V0.1-MILESTONE.md) for scope and limitations.
+
 ## Run your first restore in 60 seconds
 
 This CPU-only demo starts a warm stateful process, checkpoints it, removes the original process, restores it, sends another request, and records measured timings.
@@ -25,6 +49,12 @@ Run report:    .edo/runs/<timestamp>-resume.json
 ```
 
 The first demo needs Linux, Rust, Python 3, CRIU, and permission to execute CRIU through `sudo`. It does not need a GPU or model download.
+
+For the equivalent CLI vocabulary:
+
+```bash
+cargo run -- demo resume
+```
 
 ## What just happened?
 

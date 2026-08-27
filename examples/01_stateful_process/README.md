@@ -9,7 +9,7 @@ Linux, Rust, Python 3, and CRIU with the permissions described by `edo doctor`.
 ## Run
 
 ```bash
-../00_hello_checkpoint/run.sh
+./run.sh
 ```
 
 ## Expected output
