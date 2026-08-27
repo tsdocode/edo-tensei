@@ -19,7 +19,7 @@ The first demo is CPU-only and needs Linux, CRIU, and permission to run the CRIU
 | Warm-start a model | [`03_pytorch_warm_start`](../examples/03_pytorch_warm_start/) | PyTorch + NVIDIA GPU for full path |
 | Resume vLLM | [`04_vllm_resume`](../examples/04_vllm_resume/) | CUDA + vLLM + patched CRIU |
 | Understand CUDA | [`05_cuda_restore`](../examples/05_cuda_restore/) | CUDA + NVIDIA checkpoint API |
-| Try containers | [`07_kubernetes_migration`](../examples/07_kubernetes_migration/) | k3s/Kubernetes + GPU |
+| Try containers | [`08_kubernetes_migration`](../examples/08_kubernetes_migration/) | k3s/Kubernetes + GPU |
 
 ## Before troubleshooting
 
