@@ -7,3 +7,4 @@ Cargo.lock
 .models/
 __pycache__/
 *.py[cod]
+kubernetes/gpu-workload

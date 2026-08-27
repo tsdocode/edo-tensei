@@ -33,6 +33,26 @@ On the validated host this reports an NVIDIA H100 80GB with driver 570.211.01
 and CUDA 12.8. The smoke test is only a GPU/runtime check; it does not yet
 checkpoint a Kubernetes workload.
 
+### Real GPU workload test
+
+`gpu-workload-pod.yaml` is a long-lived CUDA Driver API process. It allocates
+256 MiB on the GPU and mounts the Edo/CRIU binaries and snapshot directory into
+the target namespace. Build/import it locally for k3s, then apply the Pod:
+
+```bash
+gcc -O2 -I/usr/local/cuda-12.8/include kubernetes/gpu-workload.c \
+  -L/usr/lib/x86_64-linux-gnu -lcuda -o kubernetes/gpu-workload
+docker build -f kubernetes/gpu-workload.Dockerfile -t edo-gpu-workload:test kubernetes
+docker save edo-snapshot-agent:test edo-gpu-workload:test | sudo k3s ctr images import -
+sudo k3s kubectl apply -f kubernetes/gpu-workload-pod.yaml
+```
+
+The first k3s run reached CUDA `CHECKPOINTED` and wrote approximately 800 MiB
+of CRIU pages. The current failure is after that point: the CRIU fork hangs
+after `Unfreezing tasks` while dumping the container's PID 1. Therefore the
+Kubernetes dump/restore path remains experimental and is not yet reported as
+passing.
+
 Build the agent image and publish it to a registry reachable by every GPU node:
 
 ```bash

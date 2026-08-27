@@ -599,6 +599,9 @@ source process was modified.
   the device plugin and a CUDA smoke-test Pod (H100, CUDA 12.8).
 - [ ] **P1 / NEXT** Run the Edo snapshot agent inside k3s against a real GPU
   workload, including container-aware dump/restore and readiness validation.
+  The first run reached CUDA `CHECKPOINTED` and wrote CRIU pages, but the
+  CRIU fork hung after `Unfreezing tasks` while dumping the container PID 1;
+  restore/readiness are still blocked.
 
 ### Gate 1 — after Phase 2
 

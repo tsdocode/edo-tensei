@@ -21,6 +21,7 @@ spec:
       serviceAccountName: edo-snapshot-agent
       hostPID: true
       hostNetwork: true
+      runtimeClassName: nvidia
       containers:
         - name: agent
           image: ghcr.io/tsdocode/edo-snapshot-agent:dev
@@ -33,6 +34,8 @@ spec:
               value: /opt/edo/bin/edo
             - name: EDO_CRIU
               value: /opt/edo/bin/criu
+            - name: LD_LIBRARY_PATH
+              value: /opt/edo/lib
             - name: SNAPSHOT_ROOT
               value: /var/lib/edo-snapshots
           ports:
@@ -56,6 +59,9 @@ spec:
             - name: edo-binaries
               mountPath: /opt/edo/bin
               readOnly: true
+            - name: edo-libraries
+              mountPath: /opt/edo/lib
+              readOnly: true
             - name: snapshots
               mountPath: /var/lib/edo-snapshots
       volumes:
@@ -69,5 +75,7 @@ spec:
           hostPath: { path: /sys/fs/cgroup, type: Directory }
         - name: edo-binaries
           hostPath: { path: /opt/edo/bin, type: Directory }
+        - name: edo-libraries
+          hostPath: { path: /opt/edo/lib, type: Directory }
         - name: snapshots
           hostPath: { path: /var/lib/edo-snapshots, type: DirectoryOrCreate }
