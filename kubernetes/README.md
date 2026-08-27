@@ -52,9 +52,10 @@ restore. Dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed
 the source process. After replacing the source with a PID-1-only placeholder,
 restore recreated the CUDA process and unlocked it successfully. The measured
 restore was 17.35s (CUDA initialization 16.59s, CRIU restore 0.47s, CUDA
-restore/unlock 0.29s) for this minimal 256 MiB fixture. The slower CUDA init is
-driver initialization in a fresh placeholder Pod; it is separate from CRIU
-memory restore.
+restore/unlock 0.29s) for this minimal 256 MiB fixture. A clean rerun measured
+17.58s restore wall time, confirming that agent prewarm does not reduce this
+number because CUDA initialization state is process-local. The slow portion is
+driver initialization in the restore helper, separate from CRIU memory restore.
 
 The required Kubernetes behavior is therefore proven for this fixture. Model
 servers still need a controller to create the placeholder, map container PIDs,
@@ -80,10 +81,10 @@ example, `/var/lib/edo-snapshots`) so that the namespace-entered Edo process
 can see the CRIU images. In production this should be a node-local encrypted
 volume or a CSI volume with a strict access policy.
 
-The agent pre-warms `cuInit()` during DaemonSet startup. The manifest mounts
-the host `libcuda.so.1` because the agent itself does not request a GPU; this
-keeps one-time driver initialization outside the restore request. Driver and
-GPU compatibility must still be enforced by the deployment policy.
+The agent contains an optional `EDO_CUDA_PREWARM` diagnostic hook. It is
+disabled by default because testing shows that CUDA initialization state is
+process-local for this driver path. Driver and GPU compatibility must still be
+enforced by the deployment policy.
 
 ## Agent API
 

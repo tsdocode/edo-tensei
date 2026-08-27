@@ -19,7 +19,7 @@ SNAPSHOTS = Path(os.environ.get("SNAPSHOT_ROOT", "/var/lib/edo-snapshots"))
 
 def prewarm_cuda() -> None:
     """Move one-time driver initialization out of restore's critical path."""
-    if os.environ.get("EDO_CUDA_PREWARM", "true").lower() not in ("1", "true", "yes"):
+    if os.environ.get("EDO_CUDA_PREWARM", "false").lower() not in ("1", "true", "yes"):
         return
     result = subprocess.run([EDO, "cuda-init"], text=True, capture_output=True, env=os.environ.copy())
     if result.returncode:
