@@ -51,11 +51,11 @@ The validated k3s run uses CRIU live-checkpoint mode and a placeholder Pod on
 restore. Dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed
 the source process. After replacing the source with a PID-1-only placeholder,
 restore recreated the CUDA process and unlocked it successfully. The measured
-restore was 17.35s (CUDA initialization 16.59s, CRIU restore 0.47s, CUDA
-restore/unlock 0.29s) for this minimal 256 MiB fixture. A clean rerun measured
-17.58s restore wall time, confirming that agent prewarm does not reduce this
-number because CUDA initialization state is process-local. The slow portion is
-driver initialization in the restore helper, separate from CRIU memory restore.
+restore was 17.35s for this minimal 256 MiB fixture. Instrumented timing shows
+that this was mostly integrity hashing, not CUDA: `cuInit()` is about 11ms and
+CRIU restore is about 0.46s. A clean verification-on run measured about 16.4s
+hashing the 832 MiB pages image. Using the optimized native SHA-256 path,
+snapshot creation completed in 2.11s with the pages hash taking about 0.7s.
 
 The required Kubernetes behavior is therefore proven for this fixture. Model
 servers still need a controller to create the placeholder, map container PIDs,
@@ -83,8 +83,9 @@ volume or a CSI volume with a strict access policy.
 
 The agent contains an optional `EDO_CUDA_PREWARM` diagnostic hook. It is
 disabled by default because testing shows that CUDA initialization state is
-process-local for this driver path. Driver and GPU compatibility must still be
-enforced by the deployment policy.
+process-local for this driver path; the actual restore bottleneck was snapshot
+integrity hashing. Driver and GPU compatibility must still be enforced by the
+deployment policy.
 
 ## Agent API
 
@@ -107,6 +108,11 @@ curl -X POST http://NODE:8787/v1/restore \
   -H content-type:application/json \
   -d '{"name":"triton-v1","host_pid":4567}'
 ```
+
+For a trusted node-local snapshot, `skip_integrity: true` avoids re-hashing
+large memory pages on the serving path. The default remains verification-on;
+only use this option when the snapshot directory is protected and its content
+was authenticated at creation time.
 
 The workload controller must only report Ready after CUDA restore/unlock and a
 model-server health/inference probe. Same-node restore is the supported MVP;

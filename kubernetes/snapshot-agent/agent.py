@@ -75,6 +75,8 @@ class Handler(BaseHTTPRequestHandler):
                 args = [EDO, "freeze-group", str(inner_pid(host_pid)), cuda, snapshot]
             else:
                 args = [EDO, "summon-group", snapshot]
+                if body.get("skip_integrity", False):
+                    args.append("--skip-integrity")
             result = run_in_namespace(host_pid, args)
             self.send_json(200 if result["returncode"] == 0 else 500, result)
         except Exception as exc:  # request errors are returned as JSON

@@ -604,11 +604,15 @@ source process was modified.
   16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
 - [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
   probes around this validated same-node snapshot/restore path.
-- [ ] Pre-warm CUDA checkpoint driver initialization in a persistent restore
-  worker. The agent-startup experiment is disabled by default because
-  `cuInit()` state is process-local and did not reduce restore latency.
-- [ ] **P1 / NEXT** Integrate a persistent CUDA/restore worker, then rerun the
-  k3s benchmark and validate the target model-server readiness path.
+- [x] Investigate the apparent CUDA initialization latency. Instrumentation
+  showed `cuInit()` at about 11ms; the apparent 16.8s cost was integrity
+  hashing of the 832 MiB CRIU pages image.
+- [x] Optimize snapshot hashing with the native SHA-256 implementation. The
+  same fixture's snapshot creation fell from 17.70s to 2.11s; pages hashing
+  fell to about 0.7s.
+- [ ] **P1 / NEXT** Integrate a persistent restore worker only if model-server
+  benchmarks show a remaining CUDA initialization bottleneck, then validate
+  the target model-server readiness path.
 
 ### Gate 1 — after Phase 2
 

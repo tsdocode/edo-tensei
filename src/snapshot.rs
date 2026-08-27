@@ -295,6 +295,22 @@ fn snapshot_files(directory: &Path) -> Result<Vec<SnapshotFile>> {
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
+    // GNU coreutils uses the platform's optimized SHA implementation (SHA-NI
+    // on the test host). This is substantially faster than the portable
+    // Rust implementation for multi-hundred-MiB CRIU page images. Keep the
+    // Rust path as a portable fallback for minimal images.
+    if let Ok(output) = Command::new("sha256sum").arg(path).output() {
+        if output.status.success() {
+            if let Some(hash) = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .next()
+            {
+                if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Ok(hash.to_owned());
+                }
+            }
+        }
+    }
     let mut file =
         fs::File::open(path).with_context(|| format!("could not read {}", path.display()))?;
     let mut digest = Sha256::new();

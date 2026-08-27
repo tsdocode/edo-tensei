@@ -315,15 +315,30 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
     let directory = PathBuf::from(snapshot_directory);
     let manifest = snapshot::read(&directory)?;
     snapshot::verify_with_options(&directory, &manifest, !skip_integrity)?;
+    let verification_time = summon_started.elapsed();
+    eprintln!(
+        "summon-group timing: snapshot verification {:.3}s (skipped={})",
+        verification_time.as_secs_f64(), skip_integrity
+    );
     snapshot::require_group_kind(&manifest)?;
     // Load/initialize the driver before CRIU starts. This work is independent
     // of the restored target processes and avoids adding it to the serving
     // critical path after CRIU resumes them.
+    let restore_started = std::time::Instant::now();
+    let load_started = std::time::Instant::now();
     let cuda = Arc::new(cuda::CudaCheckpoint::load()?);
+    let cuda_loaded = load_started.elapsed();
+    let init_started = std::time::Instant::now();
     cuda.initialize()?;
-    let cuda_initialized = summon_started.elapsed();
+    let cuda_initialized = init_started.elapsed();
+    eprintln!(
+        "summon-group timing: CUDA library load {:.3}s, cuInit {:.3}s",
+        cuda_loaded.as_secs_f64(),
+        cuda_initialized.as_secs_f64(),
+    );
+    let criu_started = std::time::Instant::now();
     criu::restore(&directory)?;
-    let criu_restored = summon_started.elapsed();
+    let criu_restore_time = criu_started.elapsed();
     let restored_root: u32 = fs::read_to_string(directory.join("restored.pid"))?
         .trim()
         .parse()?;
@@ -344,20 +359,24 @@ fn summon_group(snapshot_directory: &str, _timeout_ms: u64, skip_integrity: bool
         used.insert(match_record.pid);
         restored_pids.push(match_record.pid as i32);
     }
+    let cuda_restore_started = std::time::Instant::now();
     parallel_cuda_calls(&cuda, &restored_pids, "restore", |cuda, pid| {
         cuda.restore(pid)
     })?;
-    let cuda_restored = summon_started.elapsed();
+    let cuda_restore_time = cuda_restore_started.elapsed();
+    let cuda_unlock_started = std::time::Instant::now();
     parallel_cuda_calls(&cuda, &restored_pids, "unlock", |cuda, pid| {
         cuda.unlock(pid)
     })?;
-    let cuda_unlocked = summon_started.elapsed();
+    let cuda_unlock_time = cuda_unlock_started.elapsed();
     eprintln!(
-        "summon-group timing: CUDA init {:.3}s, CRIU restore {:.3}s, CUDA restore {:.3}s, CUDA unlock {:.3}s",
+        "summon-group timing: verify {:.3}s, CUDA load {:.3}s, cuInit {:.3}s, CRIU restore {:.3}s, CUDA restore+unlock {:.3}s, total {:.3}s",
+        verification_time.as_secs_f64(),
+        cuda_loaded.as_secs_f64(),
         cuda_initialized.as_secs_f64(),
-        criu_restored.as_secs_f64(),
-        cuda_restored.as_secs_f64(),
-        cuda_unlocked.as_secs_f64(),
+        criu_restore_time.as_secs_f64(),
+        (cuda_restore_time + cuda_unlock_time).as_secs_f64(),
+        restore_started.elapsed().as_secs_f64(),
     );
     println!(
         "CUDA+CRIU process group resumed: root PID {} workers {}",
