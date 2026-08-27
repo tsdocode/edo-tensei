@@ -21,3 +21,18 @@ jobs:
         with:
           name: edo-linux-x86_64
           path: target/release/edo
+
+  cpu-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install CRIU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y criu
+      - name: Validate demo scripts
+        run: |
+          bash tests/validate-demos.sh
+      - name: Run CPU resume smoke test
+        run: cargo run --example resume

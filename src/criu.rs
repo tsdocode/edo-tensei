@@ -151,12 +151,6 @@ pub fn restore(directory: &Path) -> Result<()> {
         // runtime-owned overlay/bind mounts than mount-v2 here.
         .arg("--mntns-compat-mode")
         .arg("--tcp-established")
-        // Give the CRIU fork a bounded worker budget for decompression and
-        // direct-page paths; buffered restore remains the host default.
-        // Upstream CRIU accepts this option too; the fork applies it to
-        // both compressed work and independent raw page batches.
-        .arg("--decompress-threads")
-        .arg("16")
         .arg("--pidfile")
         .arg(&pidfile)
         .arg("--log-file")

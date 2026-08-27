@@ -3,7 +3,9 @@ Cargo.lock
 .env
 *.log
 .edo/
+.edo/checkpoints/
 .venv-vllm/
+.venv-sglang/
 .models/
 __pycache__/
 *.py[cod]

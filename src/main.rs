@@ -22,12 +22,18 @@ fn main() -> Result<()> {
     init_logging();
     match Cli::parse().command {
         Command::Doctor { json } => doctor::run(json),
+        Command::Demo { name } => demo(&name),
+        Command::Status { target, url } => health_check(&target, url.as_deref()),
         Command::Run { name, command } => {
             process::start(&name, &command)?;
             Ok(())
         }
         Command::CpuDump { target, snapshot } => cpu_dump(&target, &snapshot),
         Command::CpuRestore { snapshot } => cpu_restore(&snapshot),
+        Command::Checkpoint { target, snapshot } => cpu_dump(&target, &snapshot),
+        Command::Restore { snapshot } => cpu_restore(&snapshot),
+        Command::Inspect { snapshot } => snapshot_check(&snapshot),
+        Command::Diff { first, second } => snapshot_diff(&first, &second),
         Command::SnapshotCheck { snapshot } => snapshot_check(&snapshot),
         Command::HealthCheck { target, url } => health_check(&target, url.as_deref()),
         Command::SnapshotClean { snapshot, yes } => snapshot_clean(&snapshot, yes),
@@ -67,6 +73,38 @@ fn main() -> Result<()> {
             skip_integrity,
         } => summon_group(&snapshot, timeout_ms, skip_integrity),
     }
+}
+
+fn demo(name: &str) -> Result<()> {
+    if name != "resume" {
+        anyhow::bail!("unknown demo '{name}'; available demos: resume");
+    }
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/00_hello_checkpoint/run.sh");
+    let status = std::process::Command::new("bash")
+        .arg(script)
+        .status()
+        .context("could not start the resume demo")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("resume demo exited with {status}");
+    }
+}
+
+fn snapshot_diff(first: &str, second: &str) -> Result<()> {
+    let left = snapshot::read(Path::new(first))?;
+    let right = snapshot::read(Path::new(second))?;
+    println!("snapshot A: {} ({})", first, left.kind);
+    println!("snapshot B: {} ({})", second, right.kind);
+    println!(
+        "architecture: {} → {}",
+        left.host.architecture, right.host.architecture
+    );
+    println!("GPU: {:?} → {:?}", left.host.gpu_name, right.host.gpu_name);
+    println!("image files: {} → {}", left.files.len(), right.files.len());
+    println!("process: {} → {}", left.process_name, right.process_name);
+    Ok(())
 }
 
 fn cuda_state(pid: i32) -> Result<()> {

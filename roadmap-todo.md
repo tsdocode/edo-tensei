@@ -46,6 +46,37 @@ latency below three seconds. The working baseline is a verified grouped
 vLLM restore; the remaining gap is dominated by CRIU page restoration and
 large CUDA/process mappings rather than model loading.
 
+## Demo experience redesign
+
+This track follows `demo.md` and makes the first minute of the project
+product-oriented while preserving the working single-crate v0.1 core.
+
+### P0 — onboarding
+
+- [x] Add a one-command CPU `resume` demo with a visible failure/recovery flow.
+- [x] Measure cold start and restore-to-request latency on every run.
+- [x] Write a structured JSON report under `.edo/runs/`.
+- [x] Add the progressive `examples/00_hello_checkpoint` and
+  `examples/01_stateful_process` path.
+- [x] Add a CI CPU-demo smoke job and shell-script validation.
+- [x] Rewrite the README around the first successful experience.
+
+### P1 — guided integrations
+
+- [x] Add product-oriented entry points for FastAPI, PyTorch, vLLM, and native
+  CUDA while retaining the original implementation-oriented paths.
+- [x] Add documentation for architecture, compatibility, CLI, troubleshooting,
+  and migration from old example paths.
+- [ ] Add a measured terminal recording or GIF for the README.
+- [ ] Add structured report generation to every framework adapter, not only the
+  CPU onboarding demo.
+
+### P2 — later experience work
+
+- [ ] Add a Triton restore demo after container mount-namespace restore works.
+- [ ] Add a Kubernetes node-drain migration walkthrough.
+- [ ] Add a report viewer/dashboard and remote checkpoint registry.
+
 ### vLLM integration status
 
 - **Phase 9 — DONE (single-GPU proof):** The dedicated
