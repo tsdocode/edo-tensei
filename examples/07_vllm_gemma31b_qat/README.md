@@ -60,6 +60,14 @@ export EDO_BIN=target/debug/edo
 ./examples/07_vllm_gemma31b_qat/run.sh --port 18087
 ```
 
+This example forces vLLM's `TRITON_ATTN` backend through
+`--attention-config '{"backend":"TRITON_ATTN"}'`. Triton attention is useful
+here because it avoids depending on the incompatible prebuilt FlashAttention
+PTX in the current CUDA 12.8 environment while keeping the normal vLLM
+attention/KV-cache path under test. It does not replace the Marlin kernel used
+by compressed-tensors QAT weights; that kernel must also be compiled for the
+installed CUDA/driver pair.
+
 Use a local model mirror or another Gemma QAT export when needed:
 
 ```bash
@@ -83,6 +91,11 @@ experimental buffered io_uring restore path:
 `--fast-restore` skips integrity hashing and must only be used when the
 snapshot directory is protected and authenticated by the deployment. The
 default command keeps verification enabled.
+
+The wrapper defaults to `--gpu-memory-utilization 0.80` so it leaves headroom
+for existing CUDA allocations on the host. Increase it with
+`EDO_GEMMA_GPU_MEMORY_UTILIZATION` only after checking `nvidia-smi`; vLLM
+rejects startup when the requested fraction exceeds currently free VRAM.
 
 ## Architecture
 
@@ -193,5 +206,14 @@ This example is single-GPU, same-host, and experimental for a large QAT model.
 Cross-node restore, multi-rank tensor parallelism, active KV migration,
 automatic Service cutover, and production checkpoint encryption remain outside
 its scope.
+
+### Current host validation
+
+On the development H100 (driver 570.211.01, CUDA 12.8), vLLM selected
+`TRITON_ATTN` successfully and loaded all four 16.83GiB checkpoint shards. The
+run stopped before serving because the prebuilt compressed-tensors Marlin
+extension raised `cudaErrorUnsupportedPtxVersion`. Snapshot/restore latency is
+therefore intentionally not reported until Marlin is rebuilt for CUDA 12.8 or
+the host driver is upgraded to a compatible CUDA 13 toolchain.
 
 Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).

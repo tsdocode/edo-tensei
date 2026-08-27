@@ -183,6 +183,8 @@ def run(args: argparse.Namespace) -> int:
         )
     if args.compilation_config:
         command.extend(["--compilation-config", args.compilation_config])
+    if args.attention_config:
+        command.extend(["--attention-config", args.attention_config])
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
     # When the launcher is an absolute path inside a uv/venv environment,
@@ -377,6 +379,10 @@ def main() -> int:
     parser.add_argument(
         "--compilation-config",
         help="vLLM compilation JSON, e.g. '{\"cudagraph_mode\":\"FULL\"}'",
+    )
+    parser.add_argument(
+        "--attention-config",
+        help='vLLM attention JSON, e.g. \'{"backend":"TRITON_ATTN"}\'',
     )
     parser.add_argument(
         "--io-uring-restore",
