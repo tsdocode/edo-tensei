@@ -42,31 +42,21 @@ than sending a request to an arbitrary node.
 
 ## End-to-end architecture
 
-```text
-                    Kubernetes scheduler
-                            │
-        ┌───────────────────┴───────────────────┐
-        │                                       │
-  source GPU Pod                         Edo DaemonSet
-  vLLM/Triton process                    one per GPU node
-        │                                       │
-        │  1. controller resolves host PID      │
-        └────────────── POST /v1/snapshot ──────┘
-                            │
-              nsenter + Edo freeze-group
-                            │
-         CRIU images + CUDA state + network.json
-                            │
-              source failure / migration event
-                            │
-  placeholder GPU Pod ─────┴────── POST /v1/restore
-  same image, mounts, GPU                 │
-                            nsenter + CRIU restore
-                                      + CUDA restore/unlock
-                                           │
-                         health probe + inference probe
-                                           │
-                                  advertise Ready
+```mermaid
+flowchart TD
+    S[Kubernetes scheduler] --> P[Source GPU Pod\nvLLM or Triton]
+    S --> D[Edo DaemonSet\none agent per GPU node]
+    P --> R[Controller resolves host PID]
+    R --> Q[POST /v1/snapshot]
+    Q --> N[nsenter + Edo freeze-group]
+    N --> I[CRIU images + CUDA state + network.json]
+    I --> X[Source failure or migration event]
+    X --> H[Placeholder GPU Pod\nsame image, mounts, GPU]
+    H --> T[POST /v1/restore]
+    T --> U[nsenter + CRIU restore]
+    U --> C[CUDA restore + unlock]
+    C --> L[Health + inference probes]
+    L --> Z[Advertise Ready]
 ```
 
 ### Snapshot sequence
@@ -192,6 +182,14 @@ the port-io-uring CRIU fork:
 | Health endpoint | healthy after startup | HTTP 200 |
 | Real completion | 74 ms warm request | 41 ms |
 | Snapshot | not applicable | ~9.2 GiB |
+
+```mermaid
+xychart-beta
+    title "Kubernetes vLLM readiness (seconds; lower is better)"
+    x-axis [Cold Pod, Restored Pod]
+    y-axis "seconds" 0 --> 35
+    bar [33.3, 6.5]
+```
 
 The 9.2 GiB snapshot includes process memory and CRIU images. Rebuildable
 vLLM/Triton compilation caches are mounted separately and reused; they are not

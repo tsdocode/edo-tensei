@@ -14,10 +14,15 @@ The model repository is mounted automatically from this directory. Triton serves
 
 ## Architecture, step by step
 
-```text
-Docker → Triton server → Python backend → CuPy GPU weights
-              ↓ readiness + inference
-       future: Edo/CRIU dump → restore placeholder → CUDA restore
+```mermaid
+flowchart LR
+    A[Docker] --> B[Triton server]
+    B --> C[Python backend]
+    C --> D[CuPy GPU weights]
+    D --> E[Readiness + inference]
+    E -. future .-> F[Edo/CRIU dump]
+    F -.-> G[Restore placeholder]
+    G -.-> H[CUDA restore]
 ```
 
 1. Triton loads `gpu_warmup` from the local model repository.

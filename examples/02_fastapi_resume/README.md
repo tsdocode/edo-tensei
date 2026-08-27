@@ -18,14 +18,20 @@ EDO_HF_MODEL=distilbert-base-uncased EDO_STARTUP_SECONDS=8 ./examples/02_fastapi
 
 ## Architecture, step by step
 
-```text
-client → FastAPI /ready, /infer
-             ↓ lifespan startup: model load + warm-up
-             ↓ POST /quiesce (readiness off, requests drained)
-             ↓ CRIU dump
-             ↓ CRIU restore
-             ↓ POST /resume (readiness on)
-client → FastAPI /ready, /infer
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as FastAPI
+    participant CRIU
+    Client->>API: /ready and /infer
+    API->>API: Lifespan startup: load + warm-up
+    Client->>API: POST /quiesce
+    API-->>Client: Readiness off; drain requests
+    API->>CRIU: Dump process
+    CRIU-->>API: Checkpoint image
+    CRIU->>API: Restore process and socket
+    Client->>API: POST /resume
+    API-->>Client: Readiness on; /infer succeeds
 ```
 
 1. `server.py` loads a Hugging Face model during lifespan startup and exposes health, readiness, state, and inference endpoints.
