@@ -267,4 +267,16 @@ enabled” baseline. The remaining size problem is GPU allocator/VMM ownership,
 not Triton attention: CRIU still sees approximately 32GiB of resident process
 state after KV release.
 
+### Terminal comparison video
+
+For a quick presentation-friendly replay of the measured comparison, run:
+
+```bash
+python3 examples/07_vllm_gemma31b_qat/make_terminal_video.py
+```
+
+This creates [`artifacts/gemma-cold-vs-restore.mp4`](../../artifacts/gemma-cold-vs-restore.mp4).
+The 26-second video is time-compressed; the timings printed inside it are the
+real benchmark values, not a second live model run.
+
 Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).
