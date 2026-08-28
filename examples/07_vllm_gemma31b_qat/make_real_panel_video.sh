@@ -19,7 +19,7 @@ jq -c 'select(type == "object" or (type == "array" and .[0] >= 172.7))' "$input"
 agg "$out_dir/cold.cast" "$out_dir/cold.gif" --cols 120 --rows 36 --speed 4 --idle-time-limit 120 >/dev/null
 agg "$out_dir/restore.cast" "$out_dir/restore.gif" --cols 120 --rows 36 --speed 4 --idle-time-limit 120 >/dev/null
 ffmpeg -y -loglevel error -i "$out_dir/cold.gif" -i "$out_dir/restore.gif" \
-  -filter_complex "[0:v]fps=10,scale=640:-1:flags=lanczos,setsar=1[left];[1:v]fps=10,scale=640:-1:flags=lanczos,setsar=1[right];[left][right]hstack=inputs=2:shortest=0,format=yuv420p" \
+  -filter_complex "[0:v]fps=10,scale=640:-1:flags=lanczos,setsar=1[left];[1:v]fps=10,scale=640:-1:flags=lanczos,setsar=1[right];[left][right]hstack=inputs=2:shortest=0,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='COLD TOTAL TO READY\: 104.158s':fontcolor=white:fontsize=26:box=1:boxcolor=0x155e75cc:boxborderw=10:x=18:y=18:enable='between(t,26.0,29.1)',drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='RESTORE TOTAL TO READY\: 11.060s':fontcolor=white:fontsize=26:box=1:boxcolor=0x166534dd:boxborderw=10:x=658:y=18:enable='between(t,2.7,5.7)',format=yuv420p" \
   -c:v libx264 -crf 18 -movflags +faststart artifacts/gemma-real-cold-vs-restore.mp4
 ffmpeg -y -loglevel error -i artifacts/gemma-real-cold-vs-restore.mp4 \
   -vf "fps=10,scale=1000:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=sierra2_4a" \
