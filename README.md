@@ -12,22 +12,34 @@ These are measured runs, not promises. They are single-GPU measurements on the d
 
 For Gemma, the historically observed first-ever cold boot was approximately
 180s when startup also paid the initial compilation/autotune/cache costs. The
-103.052s value below is the reproducible warm-cache cold boot from the latest
+104.158s value below is the reproducible warm-cache cold boot from the latest
 run; it still includes model startup and multimodal warmup.
 
 | Workload | Cold start → ready | Restore → ready | Observed improvement |
 | --- | ---: | ---: | ---: |
 | Stateful CPU process | 2.102 s | 0.164 s | **12.8× faster** |
 | Qwen3-0.6B + vLLM | 30.046 s | 3.368 s | **8.9× faster** |
-| Gemma 3 27B QAT + vLLM | 103.052 s | 11.055 s | **9.3× faster** |
+| Gemma 3 27B QAT + vLLM | 104.158 s | 11.060 s | **9.4× faster** |
+
+### The real terminal run
+
+Cold boot is shown on the left; Edo Tensei restores the warmed vLLM process
+group on the right. The large overlays stay visible at the end of each panel
+so the result is easy to verify: both paths return valid `Ready.` output.
+
+<p align="center">
+  <img src="artifacts/gemma-cold-vs-restore.gif" alt="Real terminal recording comparing cold boot and Edo Tensei restore" width="100%">
+</p>
+
+**Cold total to ready: 104.158s · Edo Tensei to ready: 11.060s · 9.4× faster**
 
 ```mermaid
 xychart-beta
     title "Time to ready (seconds; lower is better)"
     x-axis [CPU, Qwen, Gemma]
     y-axis "seconds" 0 --> 110
-    bar [2.102, 30.046, 103.052]
-    bar [0.164, 3.368, 11.055]
+    bar [2.102, 30.046, 104.158]
+    bar [0.164, 3.368, 11.060]
 ```
 
 The first bar in each pair is cold start; the second is restore. The Gemma result includes vLLM Sleep Mode, fresh KV-cache recreation, trusted local restore, and a 32 GiB snapshot. Exact numbers vary with the host, model, image storage, integrity verification, and runtime configuration. See the [full benchmark report](V0.1-MILESTONE.md) for scope and limitations.
