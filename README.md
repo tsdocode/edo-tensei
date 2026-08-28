@@ -162,4 +162,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets
 ```
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [the v0.1 report](V0.1-MILESTONE.md), and [the roadmap](roadmap-todo.md). `demo.md` is the product-experience design brief that defines this progressive structure.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [the v0.1 report](V0.1-MILESTONE.md), and [the roadmap](roadmap-todo.md).

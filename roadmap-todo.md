@@ -48,7 +48,7 @@ large CUDA/process mappings rather than model loading.
 
 ## Demo experience redesign
 
-This track follows `demo.md` and makes the first minute of the project
+This track follows the progressive example structure and makes the first minute of the project
 product-oriented while preserving the working single-crate v0.1 core.
 
 ### P0 — onboarding
