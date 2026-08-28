@@ -276,6 +276,8 @@ python3 examples/07_vllm_gemma31b_qat/make_terminal_video.py
 ```
 
 This creates [`artifacts/gemma-cold-vs-restore.mp4`](../../artifacts/gemma-cold-vs-restore.mp4).
+The equivalent lightweight GIF is available at
+[`artifacts/gemma-cold-vs-restore.gif`](../../artifacts/gemma-cold-vs-restore.gif).
 The 26-second video is time-compressed; the timings printed inside it are the
 real benchmark values, not a second live model run.
 
