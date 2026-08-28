@@ -4,7 +4,12 @@ Restore a warmed one-GPU vLLM server group — API parent plus `VLLM::EngineCore
 
 ## Run
 
-Prerequisites: Linux, one NVIDIA GPU, CUDA checkpoint symbols, the project vLLM environment, cached model, patched CRIU fork, and a dedicated server. Read [the vLLM integration notes](../../docs/integrations/vllm.md).
+Prerequisites: Linux, one NVIDIA GPU, CUDA checkpoint symbols, the project vLLM environment, cached model, the Edo CRIU fork, and a dedicated server. Read [the vLLM integration notes](../../docs/integrations/vllm.md).
+
+> **Async requirement:** this example uses vLLM's async scheduler by default.
+> Set `EDO_CRIU` to the binary built from
+> [`tsdocode/criu:port-io-uring`](https://github.com/tsdocode/criu/tree/port-io-uring).
+> Stock upstream CRIU is not sufficient for this async `io_uring` workflow.
 
 ```bash
 ./examples/04_vllm_resume/run.sh --help

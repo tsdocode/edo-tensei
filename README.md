@@ -116,6 +116,13 @@ The CLI can launch managed processes, perform CPU CRIU snapshots, coordinate CUD
 
 The narrow v0.1 path is Linux x86_64, one compatible NVIDIA GPU, and same-host restore. The H100/CUDA 12.8 environment has validated native CUDA, PyTorch, FastAPI, vLLM, SGLang, Kubernetes GPU, and snapshot reporting experiments. Triton snapshot creation works; native Docker namespace restore remains open.
 
+> **Important for async vLLM:** vLLM's asynchronous scheduler uses `io_uring`
+> state that stock CRIU cannot currently restore for this workflow. Use the
+> Edo CRIU fork at [`tsdocode/criu`](https://github.com/tsdocode/criu), branch
+> [`port-io-uring`](https://github.com/tsdocode/criu/tree/port-io-uring), and
+> point `EDO_CRIU` to that binary. The validated async commands in this repo
+> do not claim compatibility with an unpatched upstream CRIU binary.
+
 Multi-GPU, distributed workers, cross-node container migration, in-flight requests, guaranteed KV-cache preservation, and persistent VRAM are not promised.
 
 See the [compatibility matrix](docs/compatibility.md), [architecture](docs/concepts/architecture.md), and [troubleshooting guide](docs/troubleshooting.md).

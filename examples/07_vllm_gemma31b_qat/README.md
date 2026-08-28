@@ -22,6 +22,11 @@ for restore, while the KV-cache can be released and recreated separately.
 This is a destructive test of a dedicated server. Do not run it against a
 production vLLM process.
 
+> **Required for this async run:** use the Edo CRIU fork built from
+> [`tsdocode/criu:port-io-uring`](https://github.com/tsdocode/criu/tree/port-io-uring)
+> and export `EDO_CRIU` to that binary. Stock CRIU does not restore the
+> `io_uring` descriptors/mappings used by vLLM's asynchronous scheduler.
+
 ## Hardware and software gate
 
 The QAT model is large even after quantization. Use a GPU/node with enough
