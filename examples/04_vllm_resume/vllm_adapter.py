@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -42,6 +43,8 @@ def request(base: str, path: str, method: str = "GET", body=None, timeout: int =
 
 def wait_ready(base: str, timeout: int) -> None:
     deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    next_progress = started + 10
     while time.monotonic() < deadline:
         try:
             status, _ = request(base, "/health")
@@ -49,6 +52,9 @@ def wait_ready(base: str, timeout: int) -> None:
                 return
         except (HTTPError, URLError, ConnectionError):
             pass
+        if os.environ.get("EDO_SHOW_STARTUP_PROGRESS") and time.monotonic() >= next_progress:
+            print(f"[startup] waiting for /health ({time.monotonic() - started:.0f}s elapsed)", flush=True)
+            next_progress += 10
         time.sleep(1)
     raise TimeoutError(f"vLLM did not become healthy within {timeout}s")
 
@@ -211,7 +217,30 @@ def run(args: argparse.Namespace) -> int:
         env["UVLOOP_NO_URING"] = "1"
     print("Starting dedicated vLLM server:", " ".join(command), flush=True)
     cold_started = time.monotonic()
-    server = subprocess.Popen(command, env=env, start_new_session=True)
+    # A terminal stdin is not restorable when the adapter is run under
+    # asciinema/tmux/SSH. vLLM never reads stdin, so detach it explicitly;
+    # otherwise CRIU restore aborts with "tty: Don't have tty to inherit
+    # session from" for fd 0.
+    server = subprocess.Popen(
+        command,
+        env=env,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    # Relay the real vLLM log stream to the adapter terminal while keeping the
+    # child connected to a pipe rather than a pseudo-TTY. CRIU can restore a
+    # pipe; it cannot inherit the asciinema terminal after restore.
+    def relay_server_output() -> None:
+        assert server.stdout is not None
+        for line in server.stdout:
+            print(f"[vllm] {line}", end="", flush=True)
+
+    log_relay = threading.Thread(target=relay_server_output, daemon=True)
+    log_relay.start()
     try:
         wait_ready(base, args.startup_timeout)
         cold_ready_seconds = time.monotonic() - cold_started
@@ -221,7 +250,9 @@ def run(args: argparse.Namespace) -> int:
         print("model endpoint:", json.dumps(models, sort_keys=True))
         warmup_result, cold_warmup_seconds = timed_warmup(base, args.model)
         print("warmup inference:", json.dumps(warmup_result, sort_keys=True))
-        print(f"cold startup to warm inference: {time.monotonic() - cold_started:.3f}s")
+        cold_ready_total = time.monotonic() - cold_started
+        print(f"cold startup to warm inference: {cold_ready_total:.3f}s")
+        print(f"cold total time to ready: {cold_ready_total:.3f}s")
         print(f"cold warmup request latency: {cold_warmup_seconds:.3f}s")
         _, cold_ttft_seconds = timed_ttft(base, args.model)
         print(f"cold TTFT: {cold_ttft_seconds:.3f}s")
@@ -312,7 +343,9 @@ def run(args: argparse.Namespace) -> int:
             after, restore_warmup_seconds = timed_warmup(base, args.model)
             print(f"restore to /health: {restore_ready_seconds:.3f}s")
             print(f"post-restore warmup request latency: {restore_warmup_seconds:.3f}s")
-            print(f"restore to warm inference: {time.monotonic() - restore_started:.3f}s")
+            restore_ready_total = time.monotonic() - restore_started
+            print(f"restore to warm inference: {restore_ready_total:.3f}s")
+            print(f"restore total time to ready: {restore_ready_total:.3f}s")
             _, restore_ttft_seconds = timed_ttft(base, args.model)
             print(f"post-restore TTFT: {restore_ttft_seconds:.3f}s")
             print(f"TTFT delta: {restore_ttft_seconds - cold_ttft_seconds:+.3f}s")

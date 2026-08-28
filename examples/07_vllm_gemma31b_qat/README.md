@@ -22,6 +22,11 @@ for restore, while the KV-cache can be released and recreated separately.
 This is a destructive test of a dedicated server. Do not run it against a
 production vLLM process.
 
+> **Required for this async run:** use the Edo CRIU fork built from
+> [`tsdocode/criu:port-io-uring`](https://github.com/tsdocode/criu/tree/port-io-uring)
+> and export `EDO_CRIU` to that binary. Stock CRIU does not restore the
+> `io_uring` descriptors/mappings used by vLLM's asynchronous scheduler.
+
 ## Hardware and software gate
 
 The QAT model is large even after quantization. Use a GPU/node with enough
@@ -160,10 +165,21 @@ small-model numbers into this large-model result.
 | Streaming TTFT | measured by script | measured by script |
 | Snapshot size | measured by script | same artifact |
 
-Once a suitable GPU run is available, add its two printed timing values to a
-result commit and render them as a Mermaid `xychart-beta`. Until then, the
-table above deliberately avoids inventing a benchmark for hardware that has
-not been exercised in this repository.
+The latest real recording reports the end-to-end **total time to ready** (the
+moment the warm inference has completed, not merely when `/health` responds):
+
+| Run | Total time to ready | Valid output |
+| --- | ---: | --- |
+| Cold boot | **104.158 s** | `Ready.` |
+| CRIU + CUDA restore | **11.060 s** | `Ready.` |
+
+The same run measured `/health` at 104.066 s cold and 11.007 s after restore.
+The restored process kept its model/runtime state, recreated a fresh KV-cache,
+and returned a post-restore TTFT of 0.034 s (cold TTFT: 0.025 s).
+
+Re-run the command whenever the GPU, vLLM build, model, or storage changes;
+the adapter prints fresh values and the checked-in numbers above should then
+be treated as the reference run for this repository.
 
 ## Snapshot size and KV-cache interpretation
 
@@ -261,5 +277,19 @@ The earlier ~71GiB run remains useful as the “sleep requested but allocator no
 enabled” baseline. The remaining size problem is GPU allocator/VMM ownership,
 not Triton attention: CRIU still sees approximately 32GiB of resident process
 state after KV release.
+
+### Terminal comparison video
+
+For a quick presentation-friendly replay of the measured comparison, run:
+
+```bash
+python3 examples/07_vllm_gemma31b_qat/make_terminal_video.py
+```
+
+This creates [`artifacts/gemma-cold-vs-restore.mp4`](../../artifacts/gemma-cold-vs-restore.mp4).
+The equivalent lightweight GIF is available at
+[`artifacts/gemma-cold-vs-restore.gif`](../../artifacts/gemma-cold-vs-restore.gif).
+The 26-second video is time-compressed; the timings printed inside it are the
+real benchmark values, not a second live model run.
 
 Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).
