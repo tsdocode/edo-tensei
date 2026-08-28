@@ -165,10 +165,21 @@ small-model numbers into this large-model result.
 | Streaming TTFT | measured by script | measured by script |
 | Snapshot size | measured by script | same artifact |
 
-Once a suitable GPU run is available, add its two printed timing values to a
-result commit and render them as a Mermaid `xychart-beta`. Until then, the
-table above deliberately avoids inventing a benchmark for hardware that has
-not been exercised in this repository.
+The latest real recording reports the end-to-end **total time to ready** (the
+moment the warm inference has completed, not merely when `/health` responds):
+
+| Run | Total time to ready | Valid output |
+| --- | ---: | --- |
+| Cold boot | **104.158 s** | `Ready.` |
+| CRIU + CUDA restore | **11.060 s** | `Ready.` |
+
+The same run measured `/health` at 104.066 s cold and 11.007 s after restore.
+The restored process kept its model/runtime state, recreated a fresh KV-cache,
+and returned a post-restore TTFT of 0.034 s (cold TTFT: 0.025 s).
+
+Re-run the command whenever the GPU, vLLM build, model, or storage changes;
+the adapter prints fresh values and the checked-in numbers above should then
+be treated as the reference run for this repository.
 
 ## Snapshot size and KV-cache interpretation
 

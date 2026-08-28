@@ -250,7 +250,9 @@ def run(args: argparse.Namespace) -> int:
         print("model endpoint:", json.dumps(models, sort_keys=True))
         warmup_result, cold_warmup_seconds = timed_warmup(base, args.model)
         print("warmup inference:", json.dumps(warmup_result, sort_keys=True))
-        print(f"cold startup to warm inference: {time.monotonic() - cold_started:.3f}s")
+        cold_ready_total = time.monotonic() - cold_started
+        print(f"cold startup to warm inference: {cold_ready_total:.3f}s")
+        print(f"cold total time to ready: {cold_ready_total:.3f}s")
         print(f"cold warmup request latency: {cold_warmup_seconds:.3f}s")
         _, cold_ttft_seconds = timed_ttft(base, args.model)
         print(f"cold TTFT: {cold_ttft_seconds:.3f}s")
@@ -341,7 +343,9 @@ def run(args: argparse.Namespace) -> int:
             after, restore_warmup_seconds = timed_warmup(base, args.model)
             print(f"restore to /health: {restore_ready_seconds:.3f}s")
             print(f"post-restore warmup request latency: {restore_warmup_seconds:.3f}s")
-            print(f"restore to warm inference: {time.monotonic() - restore_started:.3f}s")
+            restore_ready_total = time.monotonic() - restore_started
+            print(f"restore to warm inference: {restore_ready_total:.3f}s")
+            print(f"restore total time to ready: {restore_ready_total:.3f}s")
             _, restore_ttft_seconds = timed_ttft(base, args.model)
             print(f"post-restore TTFT: {restore_ttft_seconds:.3f}s")
             print(f"TTFT delta: {restore_ttft_seconds - cold_ttft_seconds:+.3f}s")

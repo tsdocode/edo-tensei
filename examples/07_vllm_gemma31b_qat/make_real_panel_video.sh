@@ -8,12 +8,13 @@ input="${1:-artifacts/gemma-cold-vs-restore.cast}"
 out_dir=$(mktemp -d "${TMPDIR:-/tmp}/edo-real-panels.XXXXXX")
 trap 'rm -rf "$out_dir"' EXIT
 
-# These are timestamps from the successful Gemma asciinema session. The
-# snapshot/hash interval is intentionally excluded from both panels.
-jq -c 'select(type == "object" or (type == "array" and .[0] <= 105.4))' "$input" \
-  | jq -c 'select(type == "object" or .[0] <= 105.4)' > "$out_dir/cold.cast"
-jq -c 'select(type == "object" or (type == "array" and .[0] >= 173.6))' "$input" \
-  | jq -c 'if type == "object" then . else [.[0] - 173.6, .[1], .[2]] end' > "$out_dir/restore.cast"
+# These are the boundaries from the successful Gemma session currently
+# checked in. The snapshot/hash interval is intentionally excluded from both
+# panels so the two panels focus on serving readiness.
+jq -c 'select(type == "object" or (type == "array" and .[0] <= 104.6))' "$input" \
+  | jq -c 'select(type == "object" or .[0] <= 104.6)' > "$out_dir/cold.cast"
+jq -c 'select(type == "object" or (type == "array" and .[0] >= 172.7))' "$input" \
+  | jq -c 'if type == "object" then . else [.[0] - 172.7, .[1], .[2]] end' > "$out_dir/restore.cast"
 
 agg "$out_dir/cold.cast" "$out_dir/cold.gif" --cols 120 --rows 36 --speed 4 --idle-time-limit 120 >/dev/null
 agg "$out_dir/restore.cast" "$out_dir/restore.gif" --cols 120 --rows 36 --speed 4 --idle-time-limit 120 >/dev/null
