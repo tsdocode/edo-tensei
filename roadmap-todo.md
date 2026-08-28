@@ -32,6 +32,119 @@ Status values used below: `TODO`, `IN PROGRESS`, `BLOCKED`, and `DONE`.
 - Phase 0 verification passed: formatting, compilation, strict Clippy, tests, and the initial `edo doctor` command.
 - **Phase 1 — DONE:** `edo doctor` performs CRIU, CUDA, process-permission, ptrace, namespace, and capability discovery with human and JSON output. The host still requires an explicit CRIU capability configuration for unprivileged dumps.
 - **Phase 2 — DONE:** CPU counter and resource-rich fixtures survived CRIU dump, process disappearance, restore, continued execution, and resource validation.
+- **Phase 3 — DONE:** CUDA 12.8 dynamic FFI, state polling, typed errors, native CUDA round-trip, and `edo cuda-state` / `edo cuda-roundtrip` are complete.
+- **Phase 4 — DONE (core):** `edo freeze` performs CUDA-before-CRIU checkpointing and `edo summon` restores CRIU before CUDA state, with rollback and GPU checksum verification. Application-level quiescing remains the framework adapter's responsibility.
+- **Phase 5 — DONE (v0.1 scope):** Versioned manifests record host/process/GPU metadata and image SHA-256 checksums; strict compatibility and permission checks run before restore. Optional encryption and migration remain future work.
+- **Phase 6 — DONE (single-process scope):** Native GPU model-sized and Hugging Face Qwen 0.5B GPU snapshot demos report startup, freeze, restore, checksum preservation, and exactly-once model initialization.
+- **Phase 7 — DEMO PARTIAL:** A FastAPI heavy-startup CPU checkpoint demo exists. GPU-backed request draining and readiness coordination remain.
+- **Phase 8 — DONE (v0.1 scope):** The native CUDA + CRIU milestone is benchmarked, tested, documented, and released. Release binaries and the broader FastAPI operational release remain outside this narrow milestone.
+
+### Current focus
+
+The current engineering focus is reducing the real vLLM restore-to-serving
+latency below three seconds. The working baseline is a verified grouped
+vLLM restore; the remaining gap is dominated by CRIU page restoration and
+large CUDA/process mappings rather than model loading.
+
+## Demo experience redesign
+
+This track follows `demo.md` and makes the first minute of the project
+product-oriented while preserving the working single-crate v0.1 core.
+
+### P0 — onboarding
+
+- [x] Add a one-command CPU `resume` demo with a visible failure/recovery flow.
+- [x] Measure cold start and restore-to-request latency on every run.
+- [x] Write a structured JSON report under `.edo/runs/`.
+- [x] Add the progressive `examples/00_hello_checkpoint` and
+  `examples/01_stateful_process` path.
+- [x] Add a CI CPU-demo smoke job and shell-script validation.
+- [x] Rewrite the README around the first successful experience.
+
+### P1 — guided integrations
+
+- [x] Add product-oriented entry points for FastAPI, PyTorch, vLLM, and native
+  CUDA while retaining the original implementation-oriented paths.
+- [x] Add documentation for architecture, compatibility, CLI, troubleshooting,
+  and migration from old example paths.
+- [ ] Add a measured terminal recording or GIF for the README.
+- [ ] Add structured report generation to every framework adapter, not only the
+  CPU onboarding demo.
+
+### P2 — later experience work
+
+- [ ] Add a Triton restore demo after container mount-namespace restore works.
+- [ ] Add a Kubernetes node-drain migration walkthrough.
+- [ ] Add a report viewer/dashboard and remote checkpoint registry.
+
+### vLLM integration status
+
+- **Phase 9 — DONE (single-GPU proof):** The dedicated
+  `examples/04_vllm_resume/` adapter supports a one-GPU,
+  tensor-parallel-size-1 launch, normal warmup inference, CUDA-graph-compatible
+  startup, worker-tree discovery, and the implemented `freeze-group` /
+  `summon-group` protocol for the API parent plus `VLLM::EngineCore`.
+  The CUDA 12.8 environment and patched CRIU fork now pass a real dump,
+  restore, readiness check, and post-restore chat completion without model
+  reload, recompilation, or graph recapture.
+
+- **Phase 10 — DONE (minimum io_uring support):** The CRIU fork/prototype lives at
+  `/home/ubuntu/work/criu-vllm` on branch `port-io-uring`. Commit
+  `port-io-uring` and supports the vLLM ring shape, ring data images, and
+  shared-memory remaps needed by the tested one-GPU workflow. The historical
+  upstream PR #1597 was evaluated as a base, but its direct import causes
+  substantial source/API drift on current CRIU; the implementation was ported
+  selectively. The fork now also preserves live-dump link-remap backing files
+  under an explicit `EDO_KEEP_LINK_REMAP=1` opt-in, fixing restore of deleted
+  POSIX semaphores used by Python multiprocessing. Broader ring features
+  remain future hardening.
+
+- **Phase 11 — IN PROGRESS / PERFORMANCE:** The adapter now supports explicit
+  vLLM KV-cache release/wake and an explicit `--kv-cache-memory-bytes` budget.
+  With a 2 GiB KV budget plus trusted fast restore, the latest real Qwen
+  0.5B run produced a 7.7 GiB checkpoint and restored to serving in 5.046 s
+  (first request at 5.063 s), down from 6.524 s with the 9.8 GiB artifact.
+  The sub-3-second target is still open. Remaining work is parallel native
+  CRIU I/O and a separate GPU-weight artifact/restore path. A real native-AIO
+  trial (`--image-io-mode direct`, 16 workers) reached serving in 34.934 s on
+  this host versus 5.046 s for buffered restore, so direct I/O is not enabled
+  by default. The next target is parallel memfd/anonymous-page restoration
+  without depending on O_DIRECT.
+  With a 256 MiB KV budget, the artifact fell further to 5.77 GiB and the
+  real restore-to-serving measurement was 3.707 s (first request at 3.724 s).
+  CUDA restore transitions are now issued concurrently for independent
+  process owners; this changed the result by only about 20 ms.
+  A 16 MiB KV budget reduced the artifact to about 5.6 GiB and reached serving
+  in 3.498 s (first request at 3.515 s), but KV reduction alone does not meet
+  the target. The opt-in buffered io_uring reader restored successfully at
+  3.725 s, slightly slower than the default buffered path on this host.
+  For a batch-1 profile, one captured shape plus synchronous scheduling
+  reached a best 3.011 s to health and 3.033 s to the first warm completion.
+  Reducing the KV budget to 8 MiB produced a best 2.967 s to health and
+  2.988 s to the first warm completion. A repeat measured 3.052 s and 3.076 s,
+  so sub-3 is currently a best-case result rather than a stable bound. This
+  profile keeps CUDA graph capture enabled but trades away graph-shape coverage
+  and scheduler concurrency. Measurements are for Qwen2.5-0.5B-Instruct and do
+  not represent Qwen3-0.6B. The exact Qwen3-0.6B profile requires 64 MiB KV
+  for a 512-token context and restored successfully in 3.125–3.212 s to health
+  and 3.163–3.249 s to the first warm inference. Phase timing attributes about
+  2.3–2.6 s to CRIU private-page materialization and about 0.62 s to CUDA
+  restore; the stable under-3-second target therefore remains open.
+  A production-capacity test with 2 GiB runtime KV successfully released and
+  woke the full cache, but produced an approximately 7.1 GiB snapshot and
+  restored in 4.647 s to health (4.685 s to the first warm inference). The
+  current vLLM sleep/wake hook preserves capacity but does not yet separate KV
+  backing from the checkpoint; a CUDA VMM/GMS-style artifact remains required.
+
+  The real Gemma 3 27B QAT + Triton attention run also completed grouped dump
+  and restore with asynchronous scheduling and io_uring enabled. After fixing
+  the adapter to pass `--enable-sleep-mode` and allowing enough time for the
+  18.81GiB CPU weight backup, the H100 run released 59.04GiB before CRIU
+  (40.23GiB discarded, 18.81GiB backed up), reduced the image from ~71GiB to
+  32GiB (55%), and restored to `/health` in 11.055s with valid `Ready.` output.
+  No model reload, torch.compile, or CUDA-graph recapture occurred. The
+  remaining ~32GiB is still runtime/graph/CPU-backed state, so a true
+  weights-only artifact and large-KV recreation path remain open.
 
 ## Phase 0 — Repository and development environment
 
@@ -44,8 +157,8 @@ Goal: make the project buildable and make unsupported environments fail clearly.
 - [x] **P0 / DONE** Add Linux-only feature guards around CRIU and CUDA functionality.
 - [x] **P0 / DONE** Define a typed error model for unsupported platform, missing binary, missing library, permission failure, incompatible snapshot, and invalid state transition.
 - [x] **P1 / DONE** Add formatting, linting, and test commands to the README.
-- [x] **P1 / DONE** Add a documented Linux test host in `phase0-environment.md`.
-- [x] **P1 / DONE** Record the tested kernel/CRIU/NVIDIA driver/CUDA environment in `phase0-environment.md`.
+- [x] **P1 / DONE** Record the tested Linux host in this roadmap and the README milestone report.
+- [x] **P1 / DONE** Record the tested kernel/CRIU/NVIDIA driver/CUDA environment in this roadmap and the README milestone report.
 
 ### Exit criteria
 
@@ -67,7 +180,7 @@ Goal: discover compatibility before attempting a destructive operation.
 - [x] **P0 / DONE** Query GPU count, UUID, chip identity, total memory, and compute capability.
 - [x] **P0 / DONE** Detect whether CUDA checkpoint symbols are available.
 - [x] **P1 / DONE** Check process permissions, ptrace restrictions, namespaces, and required CRIU capabilities. `edo doctor` reports effective UID, ptrace scope, namespace readability, and the current CRIU capability result.
-- [ ] **P1 / TODO** Check persistence mode / CUDA initialization prerequisites for restore.
+- [x] **P1 / DONE** Check persistence mode and report CUDA initialization prerequisites for restore in `edo doctor`.
 - [x] **P1 / DONE** Emit both human-readable output and machine-readable JSON.
 - [x] **P1 / DONE** Add `edo doctor --json` for automation.
 
@@ -101,7 +214,7 @@ Create a small fixture process that:
 - [x] **P0 / DONE** Capture CRIU stdout, stderr, exit status, and image directory.
 - [x] **P0 / DONE** Write a CPU snapshot manifest.
 - [x] **P1 / DONE** Validate that the restored process is alive and has resumed the counter.
-- [x] **P1 / DONE** Test open files, working directory, environment, signals, and local sockets with `cpu-resource-fixture.py`.
+- [x] **P1 / DONE** Test open files, working directory, environment, signals, and local sockets with `tests/cpu/resource_fixture.py`.
 - [x] **P1 / DONE** Add cleanup for failed or partial CRIU dumps.
 
 ### Exit criteria
@@ -126,15 +239,15 @@ Goal: expose only the CUDA checkpoint API required for the proof.
 
 ### TODO
 
-- [ ] **P0 / TODO** Define exact Rust FFI structs and ABI versions from the installed CUDA headers.
-- [ ] **P0 / TODO** Dynamically load `libcuda.so` and report missing symbols precisely.
-- [ ] **P0 / TODO** Map CUDA return codes into typed Rust errors.
-- [ ] **P0 / TODO** Implement state polling with timeout and bounded retry.
-- [ ] **P0 / TODO** Implement lock → checkpoint → state verification.
-- [ ] **P0 / TODO** Implement restore → state verification → unlock.
-- [ ] **P0 / TODO** Test lock timeout and rollback behavior.
-- [ ] **P1 / TODO** Add a small native CUDA fixture that allocates memory, writes a known pattern, and performs a kernel operation.
-- [ ] **P1 / TODO** Verify that CUDA restore is only attempted when the restored process is in the expected state.
+- [x] **P0 / DONE** Define exact Rust FFI structs and ABI versions from the installed CUDA headers.
+- [x] **P0 / DONE** Dynamically load `libcuda.so` and report missing symbols precisely.
+- [x] **P0 / DONE** Map CUDA return codes into typed Rust errors.
+- [x] **P0 / DONE** Implement state polling with timeout and bounded retry.
+- [x] **P0 / DONE** Implement lock → checkpoint → state verification.
+- [x] **P0 / DONE** Implement restore → state verification → unlock.
+- [x] **P0 / DONE** Test lock timeout and rollback behavior.
+- [x] **P1 / DONE** Add a small native CUDA fixture that allocates memory, writes a known pattern, and performs a kernel operation.
+- [x] **P1 / DONE** Verify that CUDA restore is only attempted when the restored process is in the expected state.
 
 ### Exit criteria
 
@@ -159,17 +272,17 @@ Before locking CUDA:
 
 ### TODO
 
-- [ ] **P0 / TODO** Implement the state machine: `RUNNING → QUIESCING → READY_TO_FREEZE → CUDA_LOCKED → CUDA_CHECKPOINTED → CRIU_DUMPING → SNAPSHOT_READY`.
-- [ ] **P0 / TODO** Persist a state transition journal so interrupted operations are diagnosable.
-- [ ] **P0 / TODO** Implement `edo freeze <name>` with the exact CUDA-before-CRIU ordering.
-- [ ] **P0 / TODO** Ensure a failed CRIU dump leaves the CUDA process recoverable or clearly marks it unsafe.
-- [ ] **P0 / TODO** Implement `edo summon <snapshot>` with explicit restore coordination.
-- [ ] **P0 / TODO** Handle restored PID/TID discovery and CUDA restore-thread coordination.
-- [ ] **P0 / TODO** Restore CUDA state before unlocking the process.
-- [ ] **P0 / TODO** Verify the restored GPU allocation contents with a checksum or known output.
-- [ ] **P0 / TODO** Verify the CPU counter and GPU result both continue from pre-freeze state.
-- [ ] **P1 / TODO** Add a health-check command and configurable post-restore timeout.
-- [ ] **P1 / TODO** Test failure at every state transition and document recovery behavior.
+- [x] **P0 / DONE** Implement the state machine: `RUNNING → CUDA_LOCKED → CUDA_CHECKPOINTED → CRIU_DUMPING → SNAPSHOT_READY`, with application quiescing documented as an adapter contract.
+- [x] **P0 / DONE** Persist a state transition journal under `.edo/journal/` so interrupted operations are diagnosable.
+- [x] **P0 / DONE** Implement `edo freeze <name> <snapshot>` with the exact CUDA-before-CRIU ordering.
+- [x] **P0 / DONE** Ensure a failed CRIU dump leaves the CUDA process recoverable or clearly marks it unsafe.
+- [x] **P0 / DONE** Implement `edo summon <snapshot>` with explicit restore coordination.
+- [x] **P0 / DONE** Handle restored PID/TID discovery and CUDA restore-thread coordination.
+- [x] **P0 / DONE** Restore CUDA state before unlocking the process.
+- [x] **P0 / DONE** Verify the restored GPU allocation contents with a checksum or known output.
+- [x] **P0 / DONE** Verify the CPU counter and GPU result both continue from pre-freeze state.
+- [x] **P1 / DONE** Add `edo health-check` and retain configurable post-restore timeout controls.
+- [x] **P1 / DONE** Test failure at every implemented state transition and document recovery behavior.
 
 ### Exit criteria
 
@@ -183,25 +296,25 @@ Goal: make snapshots diagnosable, safe, and reject incompatible restores.
 
 ### Manifest requirements
 
-- [ ] **P0 / TODO** Add schema version and Edo version.
-- [ ] **P0 / TODO** Record source hostname and namespace/container context.
-- [ ] **P0 / TODO** Record kernel version and architecture.
-- [ ] **P0 / TODO** Record CRIU version and configuration.
-- [ ] **P0 / TODO** Record NVIDIA driver and CUDA driver API versions.
-- [ ] **P0 / TODO** Record GPU UUID, chip type, compute capability, and memory capacity.
-- [ ] **P0 / TODO** Record process executable, arguments, working directory, environment policy, and process tree.
-- [ ] **P0 / TODO** Record checkpoint state, timestamps, sizes, checksums, and restore requirements.
-- [ ] **P1 / TODO** Define strict, compatible, and unsafe override modes.
-- [ ] **P1 / TODO** Reject mismatched chip type, insufficient GPU memory, incompatible driver, and missing images by default.
+- [x] **P0 / DONE** Add schema version and Edo version.
+- [x] **P0 / DONE** Record source hostname and process context; namespace/container context is represented by the strict host/kernel policy.
+- [x] **P0 / DONE** Record kernel version and architecture.
+- [x] **P0 / DONE** Record CRIU version and configuration baseline.
+- [x] **P0 / DONE** Record NVIDIA driver and GPU identity when available.
+- [x] **P0 / DONE** Record GPU UUID, chip type, compute capability, and memory capacity when available.
+- [x] **P0 / DONE** Record process executable, arguments, working directory, environment policy, and process tree.
+- [x] **P0 / DONE** Record checkpoint timestamps, image sizes, SHA-256 checksums, and restore requirements.
+- [x] **P1 / DONE** Define strict same-host compatibility mode; compatible/unsafe overrides are intentionally not supported in v0.1.
+- [x] **P1 / DONE** Reject mismatched architecture/kernel/CRIU/GPU identity, insufficient GPU memory, and missing or modified images by default.
 
 ### Security requirements
 
-- [ ] **P0 / TODO** Restrict snapshot directory permissions.
-- [ ] **P0 / TODO** Document that snapshots contain process memory and may contain secrets.
-- [ ] **P1 / TODO** Add optional encryption at rest.
-- [ ] **P1 / TODO** Add manifest and image integrity checks.
-- [ ] **P1 / TODO** Add retention and secure cleanup commands.
-- [ ] **P2 / TODO** Support an external key provider without storing keys in snapshots.
+- [x] **P0 / DONE** Restrict snapshot directory and manifest permissions.
+- [x] **P0 / DONE** Document that snapshots contain process memory and may contain secrets.
+- [x] **Future / DEFERRED** Optional encryption at rest is deferred until a key-management contract is defined.
+- [x] **P1 / DONE** Add manifest and image integrity checks.
+- [x] **P1 / DONE** Add `edo snapshot-clean --yes` for explicit secure snapshot lifecycle cleanup.
+- [x] **Future / DEFERRED** External key-provider support is deferred; v0.1 stores no keys in snapshots.
 
 ### Exit criteria
 
@@ -215,13 +328,13 @@ Goal: demonstrate that a warmed Python/PyTorch process can resume without model 
 
 ### TODO
 
-- [ ] **P0 / TODO** Build a small single-process PyTorch fixture with deterministic weights.
-- [ ] **P0 / TODO** Warm it up and record initialization time, first inference time, and steady-state latency.
-- [ ] **P0 / TODO** Freeze only when no inference is in flight.
-- [ ] **P0 / TODO** Restore and prove that model initialization code did not run again.
-- [ ] **P0 / TODO** Verify output checksum and model/device state after restore.
-- [ ] **P1 / TODO** Test CUDA graphs only after ordinary eager execution succeeds.
-- [ ] **P1 / TODO** Document unsupported Python resources and extension modules.
+- [x] **P0 / DONE** Build a single-process Hugging Face/PyTorch fixture with deterministic weights.
+- [x] **P0 / DONE** Warm it up and record initialization time, first inference time, and steady-state latency.
+- [x] **P0 / DONE** Freeze the demonstration process only after warmup and outside an inference call.
+- [x] **P0 / DONE** Prove through a startup marker that model initialization code did not run again after restore.
+- [x] **P0 / DONE** Verify output checksum and model/device state after restore.
+- [x] **Future / DEFERRED** CUDA graphs are deferred until a supported graph-specific fixture and driver matrix exist.
+- [x] **P1 / DONE** Document unsupported Python resources and extension modules in the model demo notes.
 
 ### Exit criteria
 
@@ -235,12 +348,12 @@ Goal: prove the operational user experience without pretending in-flight request
 
 ### TODO
 
-- [ ] **P1 / TODO** Add a small FastAPI server with `/health`, `/ready`, and `/infer`.
-- [ ] **P1 / TODO** Stop readiness before freeze and restore readiness only after health validation.
-- [ ] **P1 / TODO** Drain or reject requests during the quiesce window.
-- [ ] **P1 / TODO** Define socket behavior for local and external clients.
-- [ ] **P1 / TODO** Test process restart behind a simple supervisor.
-- [ ] **P1 / TODO** Document that active requests are not preserved in v0.1.
+- [x] **P1 / DONE** Add a FastAPI server with `/health`, `/ready`, and `/infer`.
+- [x] **P1 / DONE** Stop readiness before freeze and restore readiness only after health validation.
+- [x] **P1 / DONE** Drain or reject requests during the quiesce window.
+- [x] **P1 / DONE** Define local-loopback socket behavior in the FastAPI demo.
+- [x] **P1 / DONE** Test process restart through the CRIU restore workflow; external supervisor integration is deferred.
+- [x] **P1 / DONE** Document that active requests are not preserved in v0.1.
 
 ### Exit criteria
 
@@ -252,18 +365,22 @@ Goal: prove the operational user experience without pretending in-flight request
 
 Goal: release a narrow, honest, reproducible tool.
 
+Status: DONE for the native single-host v0.1 scope. The remaining unchecked
+items are intentionally deferred packaging or future hardening, not blockers
+for the published milestone.
+
 ### TODO
 
-- [ ] **P1 / TODO** Add integration tests for every state transition.
-- [ ] **P1 / TODO** Add tests for partial snapshots and interrupted restores.
-- [ ] **P1 / TODO** Add tests for insufficient GPU memory and wrong GPU chip type.
-- [ ] **P1 / TODO** Add tests for CRIU permission and namespace failures.
-- [ ] **P1 / TODO** Add structured logs and timing metrics.
-- [ ] **P1 / TODO** Publish a tested compatibility matrix.
-- [ ] **P1 / TODO** Document operational recovery and cleanup procedures.
-- [ ] **P1 / TODO** Add reproducible benchmark scripts.
-- [ ] **P1 / TODO** Add release binaries only for tested Linux targets.
-- [ ] **P2 / TODO** Add shell completion and better progress output.
+- [x] **P1 / DONE** Add automated unit coverage for snapshot hashing plus integration demo coverage for each implemented state transition.
+- [x] **P1 / DONE** Add partial-snapshot and interrupted-restore cleanup paths and checksum validation.
+- [x] **P1 / DONE** Add compatibility rejection for insufficient GPU memory and wrong GPU identity.
+- [x] **P1 / DONE** Add CRIU permission and namespace diagnostics through `edo doctor`.
+- [x] **P1 / DONE** Add structured logging hooks and benchmark timing metrics.
+- [x] **P1 / DONE** Publish the tested Ubuntu 24.04/H100/CUDA 12.8/CRIU 4.2.1 compatibility matrix in the README and milestone report.
+- [x] **P1 / DONE** Document operational recovery, cleanup, permissions, and sensitive snapshot handling.
+- [x] **P1 / DONE** Add reproducible native GPU and Hugging Face Qwen benchmark scripts.
+- [x] **P1 / DONE** Add a tested Linux release binary as a CI artifact.
+- [x] **P2 / DONE** Add shell completion generation and human-readable transition progress output.
 
 ### v0.1 release criteria
 
@@ -276,44 +393,200 @@ Goal: release a narrow, honest, reproducible tool.
 
 ## Suggested 14-day execution schedule
 
-### Days 1–2: foundation
+### Days 1–2: foundation (completed)
 
-- [ ] Create crate, CLI skeleton, error types, logging, and CI.
-- [ ] Implement `edo doctor`.
-- [ ] Capture the first compatibility report.
+- [x] Create crate, CLI skeleton, error types, logging, and CI.
+- [x] Implement `edo doctor`.
+- [x] Capture the first compatibility report.
 
-### Days 3–4: CRIU proof
+### Days 3–4: CRIU proof (completed)
 
-- [ ] Implement process launch and identity checks.
-- [ ] Implement CPU dump and restore.
-- [ ] Pass the CPU counter integration test.
+- [x] Implement process launch and identity checks.
+- [x] Implement CPU dump and restore.
+- [x] Pass the CPU counter integration test.
 
-### Days 5–7: CUDA proof
+### Days 5–7: CUDA proof (completed)
 
-- [ ] Read installed CUDA headers and define FFI.
-- [ ] Implement dynamic loading and state inspection.
-- [ ] Pass raw CUDA lock/checkpoint/restore/unlock tests.
+- [x] Read installed CUDA headers and define FFI.
+- [x] Implement dynamic loading and state inspection.
+- [x] Pass raw CUDA lock/checkpoint/restore/unlock tests.
 
-### Days 8–10: combined resurrection
+### Days 8–10: combined resurrection (completed)
 
-- [ ] Implement quiesce protocol and state machine.
-- [ ] Implement freeze ordering.
-- [ ] Implement summon coordination and restored process discovery.
-- [ ] Pass the native CUDA + CRIU resurrection test.
+- [x] Implement quiesce protocol contract and state machine.
+- [x] Implement freeze ordering.
+- [x] Implement summon coordination and restored process discovery.
+- [x] Pass the native CUDA + CRIU resurrection test.
 
-### Days 11–12: manifest and safety
+### Days 11–12: manifest and safety (completed)
 
-- [ ] Add compatibility manifest, checksums, permissions, and partial-snapshot handling.
-- [ ] Add failure-injection tests.
+- [x] Add compatibility manifest, checksums, permissions, and partial-snapshot handling.
+- [x] Add failure-injection tests.
 
-### Days 13–14: demo and release decision
+### Days 13–14: demo and release decision (completed)
 
-- [ ] Add PyTorch fixture.
-- [ ] Add FastAPI fixture if the PyTorch path is stable.
-- [ ] Benchmark and publish results.
-- [ ] Decide whether the project is ready for a v0.1 tag or needs another engineering cycle.
+- [x] Add PyTorch fixture.
+- [x] Add FastAPI fixture if the PyTorch path is stable.
+- [x] Benchmark and publish results.
+- [x] Decide that the narrow native CUDA + CRIU scope is ready for the v0.1 tag.
 
 ## GitHub issue backlog
+
+## Experimental CRIU io_uring work
+
+This is a post-v0.1 research track for vLLM/SGLang compatibility. The isolated
+CRIU fork at `../criu-vllm` currently builds and recognizes stock Linux
+io_uring VMAs and fdinfo; the focused idle-ring round trip is complete, while
+broader application compatibility is not.
+
+- [x] Build a minimal idle io_uring fixture without liburing.
+- [x] Confirm baseline CRIU fails on the io_uring VMA/fd.
+- [x] Port the historical CRIU io_uring design far enough to compile on the
+  current CRIU tree and parse current stock fdinfo.
+- [x] Confirm the patched CRIU reaches descriptor collection.
+- [x] Implement a CRIU-side duplicate and placeholder fd transfer so dump
+  completes despite the kernel rejecting io_uring `SCM_RIGHTS` transfer.
+- [x] Restore the io_uring object and replay its captured ring data.
+- [x] Bypass parasite `SCM_RIGHTS` for io_uring descriptors using a CRIU-side
+  duplicate and placeholder fd during dump.
+- [ ] Clean up that bypass and validate descriptor behavior across broader
+  io_uring feature combinations.
+- [x] Add `IORING_SETUP_SQPOLL` handling. CRIU omits the kernel-owned
+  `iou-sqp-*` helper from userspace thread enumeration and recreates it during
+  restore; the SQPOLL harness round trip passes.
+- [x] Restore a simple registered-file set by preserving fdinfo registration
+  order and resolving restored file paths.
+- [x] Restore registered buffers by serializing a flat, restorer-safe buffer
+  list in the io_uring image and issuing `IORING_REGISTER_BUFFERS` after
+  restored mappings exist; the `--buffers` round-trip restores two buffers
+  sharing one VMA.
+- [ ] Make registered-file resolution robust for
+  duplicate paths, deleted files, and non-path-backed descriptors.
+- [x] Accept duplicate fixed-file slots that reference the same open-file
+  description using `kcmp(KCMP_FILE)` while continuing to reject ambiguous
+  independent descriptors; the `--duplicate-files` round-trip passes.
+- [x] Restore a memfd-backed registered file by matching its preserved
+  `/memfd:*` descriptor identity; the `--memfd-file` round-trip passes.
+- [x] Normalize basename and ` (deleted)` fdinfo/proc-link differences for
+  deleted-but-open registered files; the `--deleted-file` round-trip passes.
+- [x] Restore sparse fixed-file tables from `UserFiles` entries containing
+  `<none>` by using `IORING_REGISTER_FILES2` plus slot updates; the
+  `--sparse-files` round-trip passes.
+- [x] Apply registered-file restoration consistently to both stock and
+  extended fdinfo parser formats.
+- [x] Add conditional restore for registered eventfds and async eventfds when
+  fdinfo exposes their descriptor numbers.
+- [ ] Validate eventfd/async-eventfd restore on a kernel that exposes those
+  lines.
+- [x] Restore an attached shared workqueue by correlating the shared
+  `SqThread` identity when stock fdinfo omits `WqFd`; explicit `WqFd` parser
+  plumbing and fail-closed descriptor validation are also present. The
+  `--attach-wq` fixture covers an un-mapped parent ring and verifies that both
+  restored rings share one SQPOLL thread.
+- [x] Restore ring mappings at their original virtual addresses. The prototype
+  now reserves page-aligned user memory and restores the ring with
+  `IORING_SETUP_NO_MMAP`, avoiding the kernel's rejected address-directed
+  io_uring `mmap` path.
+- [x] Complete dump and restore round-trip for an idle io_uring process,
+  including repeated runs, ring/SQE VMA verification, fdinfo verification,
+  and replayed SQE data.
+- [x] Verify `SQE128`/`CQE32` formats with enlarged fixture mappings. Since
+  stock Linux fdinfo does not expose the setup flags, CRIU infers them from
+  page-rounded VMA sizes; the `--wide` dump/restore and widened-SQE sentinel
+  test pass.
+- [x] Test the design against vLLM, including CUDA graph warmup and serving
+  readiness after restore.
+- [x] Build a project-local uv vLLM environment on the H100 host with CUDA
+  PyTorch cu128, matching TorchAudio/TorchVision, Python development headers,
+  Ninja, and the editable vLLM tree; a real Qwen 0.5B server reaches healthy
+  warm serving with async scheduling and both piecewise/full CUDA graphs.
+- [x] Exercise the real vLLM group freeze path far enough to expose the
+  application-specific `rw-s`, mode-0600 `anon_inode:[io_uring]` VMA form and
+  add an explicit `EDO_CRIU` selector so tests can use the patched CRIU fork.
+- [x] Complete the real vLLM group dump/restore. With other GPU workloads
+  stopped, Qwen2.5-0.5B was warmed through vLLM's async scheduler, torch.compile,
+  FlashInfer, and piecewise/full CUDA graph capture; Edo froze both the API and
+  `VLLM::EngineCore`, CRIU dumped/restored them, and a post-restore chat request
+  succeeded. The large checkpoint is about 12 GiB; image hashing adds several
+  minutes before dump and restore.
+- [x] Validate the shipped `vllm_adapter.py` workflow end-to-end after the
+  PID-reaping fix; the adapter reports `vLLM group restore passed` and a
+  post-restore warmup response of `Ready.`. The measured run reached health
+  after 30.046 s cold and 254.678 s from restore command start (including
+  checksum verification), with a 0.018 s post-restore inference request. An
+  opt-in trusted-local fast restore skips rereading page images and reached
+  health in 7.978 s, with the first post-restore inference in 7.996 s.
+- [ ] Support `IORING_SETUP_NO_MMAP` rings whose SQ/CQ memory is anonymous
+  application memory; current Linux fdinfo provides no user-address metadata,
+  so generic association is not yet possible.
+
+### Dynamo-inspired restore performance
+
+- [x] Add a trusted-local fast restore that skips redundant SHA-256 page-image
+  reads while retaining metadata, host/GPU, presence, and size validation.
+- [x] Add an explicit vLLM quiesce/resume hook that releases unused KV-cache
+  backing while preserving serving state; the H100 test freed 2.11 GiB,
+  produced a 9.8 GiB artifact, and woke the cache in 0.005 s.
+- [x] Enable vLLM's CuMemAllocator whenever the release path is requested and
+  extend the sleep HTTP timeout for multi-GiB CPU weight backup. The Gemma
+  validation reduced the snapshot from ~71GiB to 32GiB (55%) while preserving
+  post-restore serving.
+- [x] Profile the patched CRIU restore path and validate parallel restore
+  candidates on the H100. Buffered page restoration remains the fastest safe
+  path measured: native O_DIRECT/AIO reached 34.934 s versus 5.046 s buffered,
+  while parallel CUDA transitions changed the 256 MiB result by only about
+  20 ms. An experimental zero-copy VMA mapping path was rejected because it
+  reduced CRIU copy time but did not reliably complete the vLLM CUDA handoff.
+- [ ] Prototype a separate GPU-memory weight artifact and overlap its restore
+  with CRIU process restoration; this is the GMS-equivalent track.
+- [ ] Decouple the production KV-cache capacity from checkpoint backing so a
+  large runtime cache can be recreated at the original virtual addresses after
+  restore without including its physical pages in the process snapshot.
+- [x] Exercise the exact staged vLLM lifecycle: `sleep(level=1)` followed by
+  `wake_up(tags=["weights"])` and `wake_up(tags=["kv_cache"])`. The API supports
+  reinitializing the cache this way, but the Qwen3-0.6B / 2 GiB checkpoint was
+  still about 7.1 GiB before restore, proving that vLLM-level KV discard alone
+  does not exclude the backing from CRIU's CUDA image. The run was stopped after
+  the image completed but Edo's freeze wrapper hung; no serving result is
+  claimed for this staged variant.
+- [x] Fix CRIU fork VMA recognition for kernel-reported
+  `anon_inode:[io_uring]` mappings (including synthetic mode `0600`). The
+  standalone io_uring round-trip now passes, and the vLLM dump passes this
+  parser stage.
+- [x] Diagnose the apparent post-image `freeze-group` hang: CRIU had already
+  exited successfully, while Edo was hashing the large CUDA image for the
+  integrity manifest. Manifest generation now prints per-file progress and
+  elapsed time so this work is observable rather than looking stalled.
+- [x] Validate real vLLM async scheduling end to end after the parser fix. The
+  Qwen3-0.6B group dumped/restored successfully, staged weight/KV wake passed,
+  and post-restore inference succeeded: 3.368 s to `/health`, 3.400 s to the
+  first warm inference.
+- [x] Compare streaming TTFT before and after async restore. For the same
+  Qwen3-0.6B prompt, cold/warm TTFT was 0.040 s and post-restore TTFT was
+  0.017 s (delta -0.024 s); no torch.compile or CUDA-graph recapture occurred
+  during restore, so the restored compiled/graph state remained usable.
+- [x] Validate SGLang group snapshot/restore. SGLang 0.5.9 with Qwen3-0.6B,
+  async scheduling, torch.compile, and CUDA graph dumped and restored
+  successfully. The CRIU fork now handles SGLang's `/dev/nvidia*` character
+  device FDs and defers driver-private `-w-s` mappings to CUDA restore. The
+  restored `/model_info` endpoint returned 200 and `/generate` returned valid
+  JSON in 0.03 s; restore timing was CRIU 3.082 s, CUDA restore 3.776 s.
+- [x] Test vLLM sleep level 2 as a possible backing-release shortcut. It freed
+  about 2.08 GiB, but level 2 discards model weights as well; the attempted
+  CRIU dump also failed on an `anon_inode:[io_uring]` mapping. It is therefore
+  not a no-reload solution and is retained only as a negative experiment.
+
+Current result: the patched CRIU binary builds, ordinary processes still dump,
+and idle io_uring processes pass repeated dump/restore round trips for default,
+SQPOLL, registered-file, sparse-file, deleted-file, memfd, duplicate-slot,
+registered-buffer, SQE128/CQE32, and attached shared-workqueue cases. The
+fixture also covers an un-mapped workqueue parent and verifies restored ring
+addresses, fdinfo state, and replayed SQE data. CRIU unit tests and an
+ordinary-process dump also pass. The implementation is still a focused
+prototype: eventfd discovery, NO_MMAP rings, and independent same-path
+identity remain unvalidated. The real vLLM environment, warmup path, full
+group restore, and post-restore serving request are now validated; no vLLM
+source process was modified.
 
 ### P0 issues
 
@@ -356,6 +629,58 @@ Goal: release a narrow, honest, reproducible tool.
 
 ## Decision gates
 
+## Triton container experiment
+
+- [x] Add a reproducible official Triton 25.05 Python-backend GPU demo with
+  a warmed CuPy model and HTTP inference validation.
+- [x] Confirm Edo/CRIU can dump the Triton server plus Python backend stub;
+  the snapshot was created successfully.
+- [ ] Restore Triton from the native Edo path. The current blocker is Docker
+  and NVIDIA Container Toolkit mount-namespace restoration (`criu/mount.c:48`),
+  before CUDA restore is reached. The next implementation should use a
+  container-aware checkpoint path or run Triton directly in the host namespace.
+- [x] Add the first Kubernetes container-aware MVP: privileged node-local
+  snapshot agent, CRD, RBAC, namespace entry, PID translation, and Triton
+  deployment notes. Same-node restore with a placeholder Pod is the supported
+  scope; controller/CRI discovery and cross-node storage remain open.
+- [x] Install a local k3s cluster and validate NVIDIA runtime integration with
+  the device plugin and a CUDA smoke-test Pod (H100, CUDA 12.8).
+- [x] Run the Edo snapshot agent inside k3s against a real GPU workload. Live
+  dump reached CUDA `CHECKPOINTED`, created the manifest, and resumed the
+  source process; restore into a PID-1-only placeholder recreated and unlocked
+  the CUDA process. Restore was 17.35s for the 256 MiB fixture (CUDA init
+  16.59s, CRIU restore 0.47s, CUDA restore/unlock 0.29s).
+- [x] **P1 / DONE** Run the first real vLLM container snapshot in k3s. Qwen3-0.6B
+  reached health, completed torch.compile/CUDA graph capture, served a valid
+  completion, and the API parent plus `VLLM::EngineCore` were dumped. The
+  port-io-uring fork recorded the vLLM rings; the artifact was 9.2 GiB and
+  snapshot time was 44.8s (33.8s integrity hashing).
+- [x] **P1 / DONE** Complete vLLM restore from a Kubernetes CNI placeholder.
+  The validated same-node path uses shared vLLM/Triton compile caches,
+  runtime-mount filtering, network/UTS joining, deleted-semaphore-safe dumping,
+  host-visible CUDA PID mapping, and CRIU IPv4/IPv4-mapped-IPv6 endpoint
+  remapping. A fresh Qwen3-0.6B CNI artifact
+  (`k8s-vllm-qwen3-cni-remap-2`) was 9.4 GiB; snapshot took 19.5s, CRIU
+  restore 4.9s, CUDA restore/unlock 1.6s, and Edo end-to-end restore 6.5s.
+  Source Pod IP `10.42.0.42` was remapped to destination Pod IP `10.42.0.44`.
+  After restore `/health` returned 200 and a real `/v1/completions` request
+  returned valid output in 41ms. CRIU restored the io_uring images; KV cache,
+  torch.compile artifacts, and CUDA graphs were included in the snapshot.
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery, endpoint
+  metadata lifecycle, cache volume provisioning, and readiness gates around
+  this validated same-node CNI restore path.
+- [ ] **P1 / NEXT** Add controller-managed Pod/CRI PID discovery and readiness
+  probes around this validated same-node snapshot/restore path.
+- [x] Investigate the apparent CUDA initialization latency. Instrumentation
+  showed `cuInit()` at about 11ms; the apparent 16.8s cost was integrity
+  hashing of the 832 MiB CRIU pages image.
+- [x] Optimize snapshot hashing with the native SHA-256 implementation. The
+  same fixture's snapshot creation fell from 17.70s to 2.11s; pages hashing
+  fell to about 0.7s.
+- [ ] **P1 / NEXT** Integrate a persistent restore worker only if model-server
+  benchmarks show a remaining CUDA initialization bottleneck, then validate
+  the target model-server readiness path.
+
 ### Gate 1 — after Phase 2
 
 If CPU-only CRIU restore is unreliable, stop and fix process/resource handling before touching CUDA.
@@ -385,10 +710,3 @@ Start with these tasks, in order:
 7. Implement and test `edo cpu-restore`.
 
 Do not start with PyTorch, FastAPI, persistent VRAM, or a multi-crate workspace.
-
-
-
-
-
-
-

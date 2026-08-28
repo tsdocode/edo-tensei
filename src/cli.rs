@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -18,6 +19,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run a guided product demo.
+    Demo { name: String },
+    /// Show whether a managed process is alive.
+    Status {
+        target: String,
+        #[arg(long)]
+        url: Option<String>,
+    },
     /// Start a managed process.
     Run {
         #[arg(long)]
@@ -29,8 +38,34 @@ pub enum Command {
     CpuDump { target: String, snapshot: String },
     /// Restore a CPU-only CRIU snapshot.
     CpuRestore { snapshot: String },
+    /// Product vocabulary alias for cpu-dump.
+    Checkpoint { target: String, snapshot: String },
+    /// Product vocabulary alias for cpu-restore.
+    Restore { snapshot: String },
+    /// Inspect snapshot metadata and integrity.
+    Inspect { snapshot: String },
+    /// Compare the high-level metadata of two snapshots.
+    Diff { first: String, second: String },
+    /// Validate snapshot compatibility, permissions, and image checksums.
+    SnapshotCheck { snapshot: String },
+    /// Check that a managed process is alive and optionally probe an HTTP health URL.
+    HealthCheck {
+        target: String,
+        #[arg(long)]
+        url: Option<String>,
+    },
+    /// Remove a snapshot directory after an explicit confirmation flag.
+    SnapshotClean {
+        snapshot: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Generate shell completions.
+    Completions { shell: Shell },
     /// Query the CUDA checkpoint state of a process without changing it.
     CudaState { pid: i32 },
+    /// Initialize the CUDA checkpoint driver before a restore request arrives.
+    CudaInit,
     /// Run CUDA lock, checkpoint, restore, and unlock on a native CUDA process.
     CudaRoundtrip {
         pid: i32,
@@ -50,10 +85,35 @@ pub enum Command {
         #[arg(long, default_value_t = 5_000)]
         lock_timeout_ms: u32,
     },
+    /// Lock CUDA in a process group, then dump the complete CRIU descendant tree.
+    FreezeGroup {
+        /// API/root process name or PID.
+        root: String,
+        /// Comma-separated CUDA-owning process PIDs, including the root when applicable.
+        cuda_pids: String,
+        /// Destination CUDA+CRIU group snapshot directory.
+        snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+        #[arg(long, default_value_t = 5_000)]
+        lock_timeout_ms: u32,
+    },
     /// Restore a CUDA+CRIU snapshot and resume the GPU process.
     Summon {
         snapshot: String,
         #[arg(long, default_value_t = 10_000)]
         timeout_ms: u64,
+        /// Skip per-image SHA-256 verification for a trusted local snapshot.
+        #[arg(long)]
+        skip_integrity: bool,
+    },
+    /// Restore a CUDA+CRIU process group and resume every recorded CUDA worker.
+    SummonGroup {
+        snapshot: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+        /// Skip per-image SHA-256 verification for a trusted local snapshot.
+        #[arg(long)]
+        skip_integrity: bool,
     },
 }

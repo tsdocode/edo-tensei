@@ -34,7 +34,7 @@ echo "Launching FastAPI server with heavy startup..."
     EDO_MODEL_MB="${EDO_MODEL_MB:-64}" \
     EDO_USE_HF_MODEL="${EDO_USE_HF_MODEL:-1}" \
     EDO_HF_MODEL="${EDO_HF_MODEL:-sshleifer/tiny-distilbert-base-cased}" \
-    python3 examples/fastapi-heavy-startup/app.py >"$launch_log" 2>&1
+    python3 examples/02_fastapi_resume/server.py >"$launch_log" 2>&1
 
 for _attempt in $(seq 1 120); do
     if curl --silent --fail "http://127.0.0.1:$port/ready" >/dev/null; then break; fi
@@ -47,12 +47,20 @@ curl --silent --fail "http://127.0.0.1:$port/infer?value=2"
 echo
 echo "Before checkpoint: $before_state"
 
+curl --silent --fail -X POST "http://127.0.0.1:$port/quiesce"
+if curl --silent --fail "http://127.0.0.1:$port/ready" >/dev/null; then
+    echo "server remained ready during quiesce" >&2
+    exit 1
+fi
+
 echo "Checkpointing FastAPI process..."
 sudo "$binary" cpu-dump "$process_name" "$snapshot_dir"
 
 echo "Restoring FastAPI process..."
 sudo "$binary" cpu-restore "$snapshot_dir"
 
+curl --silent --fail "http://127.0.0.1:$port/health"
+curl --silent --fail -X POST "http://127.0.0.1:$port/resume"
 for _attempt in $(seq 1 20); do
     if curl --silent --fail "http://127.0.0.1:$port/ready" >/dev/null; then break; fi
     sleep 1

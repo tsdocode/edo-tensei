@@ -1,0 +1,7 @@
+{"version":2,"width":100,"height":18,"timestamp":0,"env":{"SHELL":"/bin/bash","TERM":"xterm-256color"}}
+[0.0,"o","$ cargo run --example resume\n"]
+[0.3,"o","Edo Tensei — Resume a warm workload\n"]
+[0.6,"o","✓ Started workload\n✓ Warm-up completed\n"]
+[0.9,"o","✓ Checkpoint created\n✓ Original process disappeared\n"]
+[1.2,"o","✓ Restored successfully\n✓ Request completed after restore\n"]
+[1.5,"o","Cold start:    2509.6 ms\nRestore time:  166.8 ms\nRun report:    .edo/runs/<timestamp>-resume.json\n"]

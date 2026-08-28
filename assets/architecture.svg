@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" role="img" aria-labelledby="title desc">
+  <title id="title">Edo Tensei architecture</title>
+  <desc id="desc">The Edo CLI coordinates a process manager, CRIU backend, CUDA backend, and snapshot manifest.</desc>
+  <rect width="900" height="300" rx="24" fill="#171421"/>
+  <g font-family="sans-serif" fill="#f6edf4" text-anchor="middle">
+    <text x="450" y="42" font-size="24" font-weight="700">Edo Tensei runtime</text>
+    <rect x="350" y="65" width="200" height="55" rx="12" fill="#8e4d8f"/>
+    <text x="450" y="99" font-size="18">edo CLI</text>
+    <path d="M450 120v32M160 152h580M160 152v28M380 152v28M600 152v28M740 152v28" stroke="#d9a8db" stroke-width="3" fill="none"/>
+    <g font-size="15">
+      <rect x="70" y="180" width="180" height="65" rx="12" fill="#293d61"/><text x="160" y="208">Process manager</text><text x="160" y="230" font-size="12">/proc + CRIU</text>
+      <rect x="290" y="180" width="180" height="65" rx="12" fill="#355f58"/><text x="380" y="208">CUDA backend</text><text x="380" y="230" font-size="12">libcuda checkpoint</text>
+      <rect x="510" y="180" width="180" height="65" rx="12" fill="#815d35"/><text x="600" y="208">Snapshot manifest</text><text x="600" y="230" font-size="12">metadata + integrity</text>
+      <rect x="730" y="180" width="110" height="65" rx="12" fill="#5d3d70"/><text x="785" y="208">GPU</text><text x="785" y="230" font-size="12">NVIDIA</text>
+    </g>
+  </g>
+</svg>

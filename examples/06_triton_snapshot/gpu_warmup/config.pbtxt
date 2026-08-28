@@ -1,0 +1,8 @@
+name: "gpu_warmup"
+backend: "python"
+max_batch_size: 8
+
+input [{ name: "INPUT" data_type: TYPE_FP32 dims: [ 1024 ] }]
+output [{ name: "OUTPUT" data_type: TYPE_FP32 dims: [ 1024 ] }]
+
+instance_group [{ kind: KIND_GPU count: 1 }]

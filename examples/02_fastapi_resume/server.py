@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -25,8 +26,11 @@ state: dict[str, Any] = {
     "model_name": None,
     "model_parameters": 0,
     "request_count": 0,
+    "accepting": False,
+    "inflight": 0,
     "model": None,
 }
+state_lock = threading.Condition()
 
 
 def build_model() -> Any:
@@ -74,9 +78,13 @@ def build_model() -> Any:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     state["model"] = build_model()
-    state["ready"] = True
+    with state_lock:
+        state["ready"] = True
+        state["accepting"] = True
     yield
-    state["ready"] = False
+    with state_lock:
+        state["ready"] = False
+        state["accepting"] = False
     state["model"] = None
 
 
@@ -90,8 +98,30 @@ def health() -> dict[str, str]:
 
 @app.get("/ready")
 def ready() -> dict[str, str]:
-    if not state["ready"]:
+    if not state["ready"] or not state["accepting"]:
         raise HTTPException(status_code=503, detail="startup is still running")
+    return {"status": "ready"}
+
+
+@app.post("/quiesce")
+def quiesce(timeout_seconds: float = 10.0) -> dict[str, Any]:
+    """Stop new inference and wait for active requests to drain."""
+    deadline = time.monotonic() + timeout_seconds
+    with state_lock:
+        state["accepting"] = False
+        while state["inflight"] and time.monotonic() < deadline:
+            state_lock.wait(timeout=0.1)
+        if state["inflight"]:
+            raise HTTPException(status_code=409, detail="inference requests did not drain")
+    return {"status": "quiesced", "inflight": 0}
+
+
+@app.post("/resume")
+def resume() -> dict[str, str]:
+    with state_lock:
+        if not state["ready"] or state["model"] is None:
+            raise HTTPException(status_code=503, detail="model is not ready")
+        state["accepting"] = True
     return {"status": "ready"}
 
 
@@ -100,6 +130,8 @@ def snapshot_state() -> dict[str, Any]:
     return {
         "pid": os.getpid(),
         "ready": state["ready"],
+        "accepting": state["accepting"],
+        "inflight": state["inflight"],
         "startup_started_at": state["startup_started_at"],
         "startup_finished_at": state["startup_finished_at"],
         "startup_duration_seconds": state["startup_duration_seconds"],
@@ -113,24 +145,31 @@ def snapshot_state() -> dict[str, Any]:
 
 @app.get("/infer")
 def infer(value: float = 1.0) -> dict[str, Any]:
-    if not state["ready"] or state["model"] is None:
-        raise HTTPException(status_code=503, detail="model is not ready")
-
-    state["request_count"] += 1
-    if USE_HF_MODEL:
-        import torch
-
-        model_bundle = state["model"]
-        tokens = model_bundle["tokenizer"](str(value), return_tensors="pt")
-        with torch.inference_mode():
-            output = model_bundle["model"](**tokens).last_hidden_state
-        result = float(output.mean().item())
-    else:
+    with state_lock:
+        if not state["ready"] or not state["accepting"] or state["model"] is None:
+            raise HTTPException(status_code=503, detail="model is not ready or quiesced")
+        state["request_count"] += 1
+        state["inflight"] += 1
+        request_count = state["request_count"]
         model = state["model"]
-        sample = bytes(model[:4096]) + repr(value).encode()
-        digest = hashlib.blake2b(sample, digest_size=8).hexdigest()
-        result = int(digest, 16) / float(2**64)
-    return {"value": value, "result": result, "request_count": state["request_count"]}
+    try:
+        if USE_HF_MODEL:
+            import torch
+
+            model_bundle = model
+            tokens = model_bundle["tokenizer"](str(value), return_tensors="pt")
+            with torch.inference_mode():
+                output = model_bundle["model"](**tokens).last_hidden_state
+            result = float(output.mean().item())
+        else:
+            sample = bytes(model[:4096]) + repr(value).encode()
+            digest = hashlib.blake2b(sample, digest_size=8).hexdigest()
+            result = int(digest, 16) / float(2**64)
+        return {"value": value, "result": result, "request_count": request_count}
+    finally:
+        with state_lock:
+            state["inflight"] -= 1
+            state_lock.notify_all()
 
 
 if __name__ == "__main__":
