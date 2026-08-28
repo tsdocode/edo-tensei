@@ -42,6 +42,8 @@ def request(base: str, path: str, method: str = "GET", body=None, timeout: int =
 
 def wait_ready(base: str, timeout: int) -> None:
     deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    next_progress = started + 10
     while time.monotonic() < deadline:
         try:
             status, _ = request(base, "/health")
@@ -49,6 +51,9 @@ def wait_ready(base: str, timeout: int) -> None:
                 return
         except (HTTPError, URLError, ConnectionError):
             pass
+        if os.environ.get("EDO_SHOW_STARTUP_PROGRESS") and time.monotonic() >= next_progress:
+            print(f"[startup] waiting for /health ({time.monotonic() - started:.0f}s elapsed)", flush=True)
+            next_progress += 10
         time.sleep(1)
     raise TimeoutError(f"vLLM did not become healthy within {timeout}s")
 

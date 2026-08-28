@@ -10,6 +10,7 @@ echo "=== cold boot, snapshot, restore, and serving probe are real ==="
 export EDO_CRIU="${EDO_CRIU:-/usr/local/sbin/criu}"
 export EDO_BIN="${EDO_BIN:-$repo_root/target/debug/edo}"
 export EDO_VLLM_COMMAND="${EDO_VLLM_COMMAND:-$repo_root/.venv-vllm/bin/vllm}"
+export EDO_SHOW_STARTUP_PROGRESS=1
 
 "$repo_root/.venv-vllm/bin/python" examples/04_vllm_resume/vllm_adapter.py \
   --model "${EDO_RECORD_MODEL:-gaunernst/gemma-3-27b-it-qat-compressed-tensors}" \
