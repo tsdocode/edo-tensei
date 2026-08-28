@@ -18,6 +18,7 @@ The first demo is CPU-only and needs Linux, CRIU, and permission to run the CRIU
 | Resume an HTTP service | [`02_fastapi_resume`](../examples/02_fastapi_resume/) | Python + FastAPI |
 | Warm-start a model | [`03_pytorch_warm_start`](../examples/03_pytorch_warm_start/) | PyTorch + NVIDIA GPU for full path |
 | Resume vLLM | [`04_vllm_resume`](../examples/04_vllm_resume/) | CUDA + vLLM + patched CRIU |
+| Large Gemma QAT | [`07_vllm_gemma31b_qat`](../examples/07_vllm_gemma31b_qat/) | Large GPU + vLLM + patched CRIU |
 | Understand CUDA | [`05_cuda_restore`](../examples/05_cuda_restore/) | CUDA + NVIDIA checkpoint API |
 | Try containers | [`08_kubernetes_migration`](../examples/08_kubernetes_migration/) | k3s/Kubernetes + GPU |
 
