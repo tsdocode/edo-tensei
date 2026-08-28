@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -225,9 +226,21 @@ def run(args: argparse.Namespace) -> int:
         env=env,
         start_new_session=True,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
+    # Relay the real vLLM log stream to the adapter terminal while keeping the
+    # child connected to a pipe rather than a pseudo-TTY. CRIU can restore a
+    # pipe; it cannot inherit the asciinema terminal after restore.
+    def relay_server_output() -> None:
+        assert server.stdout is not None
+        for line in server.stdout:
+            print(f"[vllm] {line}", end="", flush=True)
+
+    log_relay = threading.Thread(target=relay_server_output, daemon=True)
+    log_relay.start()
     try:
         wait_ready(base, args.startup_timeout)
         cold_ready_seconds = time.monotonic() - cold_started
