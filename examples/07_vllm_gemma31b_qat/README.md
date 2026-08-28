@@ -169,8 +169,8 @@ not been exercised in this repository.
 
 The full snapshot can be very large because process memory includes model
 weights, allocator state, compiled runtime state, CUDA graph pools, and KV
-pages. The `--release-kv-cache` path uses vLLM Sleep Mode level 1 at the
-boundary:
+pages. The `--release-kv-cache` path enables vLLM Sleep Mode and uses level 1
+at the boundary:
 
 1. model weights stay resident in the snapshot contract;
 2. vLLM releases the reclaimable KV backing before CRIU hashes/captures the
@@ -178,11 +178,13 @@ boundary:
 3. after restore, weights are woken first; and
 4. a fresh KV allocation is initialized before readiness is reported.
 
-This can make the artifact smaller, but it does not preserve active
+This can make the artifact much smaller, but it does not preserve active
 conversations or token history in KV. On the tested vLLM build, most of the
-44.08GiB KV allocation remained mapped after level-1 sleep, so this mode is
-not yet a true KV-excluding snapshot. A CUDA VMM/GMS-style allocation export
-is still needed to remove those pages without discarding the serving process.
+40.18GiB KV allocation was released after the allocator was correctly enabled,
+but the resulting image still contains CPU-backed weights and other CUDA
+runtime/graph allocations. A CUDA VMM/GMS-style allocation export is still
+needed for a true weights-only artifact with a large KV cache recreated after
+restore.
 Existing requests must be drained before the snapshot, and clients should
 retry through the serving layer after restore.
 
@@ -222,28 +224,42 @@ real dump/restore with asynchronous vLLM scheduling and `io_uring` enabled.
 
 | Signal | Cold start | After restore |
 | --- | ---: | ---: |
-| `/health` ready | 112.061s | 46.532s |
+| `/health` ready | 103.052s | 11.055s |
 | Warm completion | 0.098s | 0.052s |
 | TTFT | 0.027s | 0.025s |
-| Snapshot artifact | — | ~71GiB |
+| Snapshot artifact | — | ~32GiB |
 | Model reload / compile / graph capture | required | not repeated |
 | Output validation | `Ready.` | `Ready.` |
 
+### Cold-boot interpretation
+
+The initial Gemma experiment took approximately 180s for cold boot because it
+also created the first torch.compile/autotune artifacts. After those artifacts
+were cached, the latest measured cold boot was 103.052s. The restore number of
+11.055s is from that same warm-cache run and includes CUDA/CRIU restore plus
+fresh KV-cache wake-up.
+
+The new allocator-enabled run used `EDO_GEMMA_GPU_MEMORY_UTILIZATION=0.68`
+because unrelated services occupied about 9.5GiB on the H100. It measured
+103.052s cold `/health`, 11.055s restore to `/health`, and a 32GiB snapshot.
+vLLM reported 59.04GiB released before CRIU (40.23GiB discarded and 18.81GiB
+backed up on CPU). The previous run had a ~71GiB image because the adapter did
+not pass `--enable-sleep-mode`; this is a 39GiB / 55% reduction. The restored
+completion was valid and no model reload, torch.compile, or CUDA-graph
+recapture occurred. The adapter timeout was also increased for the multi-GiB
+weight-to-host copy.
+
 ```mermaid
 xychart-beta
-    title "Gemma QAT vLLM latency (H100, one GPU)"
-    x-axis [Cold, Restore]
-    y-axis "Seconds" 0 --> 120
-    bar [112.061, 46.532]
+    title "Gemma QAT: cold boot vs restore (H100)"
+    x-axis [Cold boot, Restore]
+    y-axis "Seconds" 0 --> 110
+    bar [103.052, 11.055]
 ```
 
-The run used `--release-kv-cache`, but vLLM level-1 sleep reported only
-3.91GiB freed from 44.08GiB of KV allocation; the resulting CRIU image was
-still approximately 71GiB. Restore itself completed in 35.229s, CUDA restore
-and unlock took 11.146s, and the first post-restore response was valid without
-model reload, torch recompilation, or CUDA-graph recapture. The remaining
-restore latency is dominated by CRIU page materialization, while the remaining
-artifact-size problem is GPU allocator/VMM ownership rather than Triton
-attention.
+The earlier ~71GiB run remains useful as the “sleep requested but allocator not
+enabled” baseline. The remaining size problem is GPU allocator/VMM ownership,
+not Triton attention: CRIU still sees approximately 32GiB of resident process
+state after KV release.
 
 Next: [08 · Kubernetes migration](../08_kubernetes_migration/README.md).

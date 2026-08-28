@@ -8,23 +8,29 @@ Edo Tensei checkpoints live AI workloads and restores them with their runtime st
 
 ## The wow moment: restore beats cold start
 
-These are measured runs, not promises. The CPU row is produced by the first-run demo on this repository's development host; the vLLM row is the validated Qwen3-0.6B single-GPU run documented in the roadmap.
+These are measured runs, not promises. They are single-GPU measurements on the development H100; the Gemma run uses an allocator-enabled, KV-release snapshot.
+
+For Gemma, the historically observed first-ever cold boot was approximately
+180s when startup also paid the initial compilation/autotune/cache costs. The
+103.052s value below is the reproducible warm-cache cold boot from the latest
+run; it still includes model startup and multimodal warmup.
 
 | Workload | Cold start → ready | Restore → ready | Observed improvement |
 | --- | ---: | ---: | ---: |
 | Stateful CPU process | 2.102 s | 0.164 s | **12.8× faster** |
 | Qwen3-0.6B + vLLM | 30.046 s | 3.368 s | **8.9× faster** |
+| Gemma 3 27B QAT + vLLM | 103.052 s | 11.055 s | **9.3× faster** |
 
 ```mermaid
 xychart-beta
     title "Time to ready (seconds; lower is better)"
-    x-axis [CPU, vLLM]
-    y-axis "seconds" 0 --> 32
-    bar [2.102, 30.046]
-    bar [0.164, 3.368]
+    x-axis [CPU, Qwen, Gemma]
+    y-axis "seconds" 0 --> 110
+    bar [2.102, 30.046, 103.052]
+    bar [0.164, 3.368, 11.055]
 ```
 
-The first bar in each pair is cold start; the second is restore. Exact numbers vary with the host, model, image storage, integrity verification, and runtime configuration. See the [full benchmark report](V0.1-MILESTONE.md) for scope and limitations.
+The first bar in each pair is cold start; the second is restore. The Gemma result includes vLLM Sleep Mode, fresh KV-cache recreation, trusted local restore, and a 32 GiB snapshot. Exact numbers vary with the host, model, image storage, integrity verification, and runtime configuration. See the [full benchmark report](V0.1-MILESTONE.md) for scope and limitations.
 
 ## Run your first restore in 60 seconds
 

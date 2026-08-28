@@ -137,11 +137,14 @@ product-oriented while preserving the working single-crate v0.1 core.
   backing from the checkpoint; a CUDA VMM/GMS-style artifact remains required.
 
   The real Gemma 3 27B QAT + Triton attention run also completed grouped dump
-  and restore with asynchronous scheduling and io_uring enabled: cold startup
-  was 112.061 s, restore to health was 46.532 s, restore itself was 35.229 s,
-  and post-restore TTFT was 0.025 s versus 0.027 s cold. The image was about
-  71 GiB because level-1 sleep released only 3.91 GiB of a 44.08 GiB KV
-  allocation; this validates serving continuity but not KV exclusion.
+  and restore with asynchronous scheduling and io_uring enabled. After fixing
+  the adapter to pass `--enable-sleep-mode` and allowing enough time for the
+  18.81GiB CPU weight backup, the H100 run released 59.04GiB before CRIU
+  (40.23GiB discarded, 18.81GiB backed up), reduced the image from ~71GiB to
+  32GiB (55%), and restored to `/health` in 11.055s with valid `Ready.` output.
+  No model reload, torch.compile, or CUDA-graph recapture occurred. The
+  remaining ~32GiB is still runtime/graph/CPU-backed state, so a true
+  weights-only artifact and large-KV recreation path remain open.
 
 ## Phase 0 — Repository and development environment
 
@@ -524,6 +527,10 @@ broader application compatibility is not.
 - [x] Add an explicit vLLM quiesce/resume hook that releases unused KV-cache
   backing while preserving serving state; the H100 test freed 2.11 GiB,
   produced a 9.8 GiB artifact, and woke the cache in 0.005 s.
+- [x] Enable vLLM's CuMemAllocator whenever the release path is requested and
+  extend the sleep HTTP timeout for multi-GiB CPU weight backup. The Gemma
+  validation reduced the snapshot from ~71GiB to 32GiB (55%) while preserving
+  post-restore serving.
 - [x] Profile the patched CRIU restore path and validate parallel restore
   candidates on the H100. Buffered page restoration remains the fastest safe
   path measured: native O_DIRECT/AIO reached 34.934 s versus 5.046 s buffered,

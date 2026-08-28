@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-def request(base: str, path: str, method: str = "GET", body=None):
+def request(base: str, path: str, method: str = "GET", body=None, timeout: int = 10):
     data = None if body is None else json.dumps(body).encode()
     req = Request(
         f"{base}{path}",
@@ -30,7 +30,7 @@ def request(base: str, path: str, method: str = "GET", body=None):
         headers={"content-type": "application/json"},
     )
     try:
-        with urlopen(req, timeout=10) as response:
+        with urlopen(req, timeout=timeout) as response:
             raw = response.read().decode()
             try:
                 return response.status, json.loads(raw)
@@ -53,8 +53,8 @@ def wait_ready(base: str, timeout: int) -> None:
     raise TimeoutError(f"vLLM did not become healthy within {timeout}s")
 
 
-def post_empty(base: str, path: str) -> None:
-    status, result = request(base, path, method="POST")
+def post_empty(base: str, path: str, timeout: int = 10) -> None:
+    status, result = request(base, path, method="POST", timeout=timeout)
     if status != 200:
         raise RuntimeError(f"vLLM endpoint {path} failed with HTTP {status}: {result}")
 
@@ -185,6 +185,12 @@ def run(args: argparse.Namespace) -> int:
         command.extend(["--compilation-config", args.compilation_config])
     if args.attention_config:
         command.extend(["--attention-config", args.attention_config])
+    # The sleep endpoint is only useful for snapshot minimization when vLLM
+    # allocates weights/KV through CuMemAllocator. Without this flag the
+    # endpoint can still respond, but the allocator tracks little or none of
+    # the model state and CRIU captures the large CUDA allocation unchanged.
+    if args.release_kv_cache:
+        command.append("--enable-sleep-mode")
     env = os.environ.copy()
     env["VLLM_SERVER_DEV_MODE"] = "1"
     # When the launcher is an absolute path inside a uv/venv environment,
@@ -230,7 +236,13 @@ def run(args: argparse.Namespace) -> int:
         if args.full_snapshot:
             if args.release_kv_cache:
                 release_started = time.monotonic()
-                post_empty(base, f"/sleep?level={args.sleep_level}&mode=wait")
+                # Copying a large model's tagged weights to pinned host memory
+                # can take longer than the normal health/request timeout.
+                post_empty(
+                    base,
+                    f"/sleep?level={args.sleep_level}&mode=wait",
+                    timeout=max(120, args.startup_timeout),
+                )
                 wait_sleeping(base, True, args.startup_timeout)
                 print(
                     f"Dynamo-style KV-cache release: {time.monotonic() - release_started:.3f}s",
