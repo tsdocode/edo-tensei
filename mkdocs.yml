@@ -51,6 +51,8 @@ extra:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Release notes:
+      - v0.1.0: releases/v0.1.0.md
   - Concepts:
       - Architecture: concepts/architecture.md
       - Compatibility: compatibility.md
