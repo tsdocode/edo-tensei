@@ -211,7 +211,18 @@ def run(args: argparse.Namespace) -> int:
         env["UVLOOP_NO_URING"] = "1"
     print("Starting dedicated vLLM server:", " ".join(command), flush=True)
     cold_started = time.monotonic()
-    server = subprocess.Popen(command, env=env, start_new_session=True)
+    # A terminal stdin is not restorable when the adapter is run under
+    # asciinema/tmux/SSH. vLLM never reads stdin, so detach it explicitly;
+    # otherwise CRIU restore aborts with "tty: Don't have tty to inherit
+    # session from" for fd 0.
+    server = subprocess.Popen(
+        command,
+        env=env,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     try:
         wait_ready(base, args.startup_timeout)
         cold_ready_seconds = time.monotonic() - cold_started
