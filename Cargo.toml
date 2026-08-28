@@ -2,7 +2,7 @@
 name = "edo"
 version = "0.1.0"
 edition = "2021"
-description = "GPU process snapshot and fast-resume runtime"
+description = "Checkpoint and restore live AI workloads, including PyTorch and vLLM processes"
 license = "Apache-2.0"
 readme = "README.md"
 

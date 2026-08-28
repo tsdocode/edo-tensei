@@ -4,6 +4,11 @@ Edo Tensei checkpoints live AI workloads and restores them with their runtime st
 
 > Warm it once. Freeze it. Let it disappear. Bring it back ready to serve.
 
+> **Edo Tensei v0.1 · Technical preview / experimental**<br>
+> Validated on Ubuntu 24.04 x86_64, NVIDIA H100 80 GB, CUDA 12.8, and CRIU
+> 4.2.1. The primary capability is same-host checkpoint/restore of live AI
+> workloads. This release is intended for controlled technical evaluation.
+
 ![Edo Tensei — live checkpoint and restore for AI workloads](assets/edo-tensei-banner.jpg)
 
 ## The wow moment: restore beats cold start
@@ -44,9 +49,12 @@ xychart-beta
 
 The first bar in each pair is cold start; the second is restore. The Gemma result includes vLLM Sleep Mode, fresh KV-cache recreation, trusted local restore, and a 32 GiB snapshot. Exact numbers vary with the host, model, image storage, integrity verification, and runtime configuration. See the [full benchmark report](V0.1-MILESTONE.md) for scope and limitations.
 
-## Run your first restore in 60 seconds
+## Run your first restore (CPU developer path)
 
-This CPU-only demo starts a warm stateful process, checkpoints it, removes the original process, restores it, sends another request, and records measured timings.
+This CPU-only demo starts a warm stateful process, checkpoints it, removes the
+original process, restores it, sends another request, and records measured
+timings. It is currently Linux/CRIU-based and intended for developers with a
+Linux environment; it is not a macOS or Windows quick-start.
 
 ```bash
 cargo run --example resume
@@ -98,7 +106,7 @@ CRIU restored the process memory, counter, signal handlers, open report file, an
 | [05 — Restore CUDA](examples/05_cuda_restore/) | Native CUDA state | NVIDIA checkpoint API |
 | [06 — Triton snapshot](examples/06_triton_snapshot/) | Container inference server | Docker + NVIDIA Toolkit |
 | [07 — Large Gemma QAT](examples/07_vllm_gemma31b_qat/) | Large vLLM process-group snapshot | Large NVIDIA GPU + vLLM |
-| [08 — Kubernetes migration](examples/08_kubernetes_migration/) | DaemonSet agent and same-node Pod restore | k3s/Kubernetes + GPU |
+| [08 — Kubernetes migration](examples/08_kubernetes_migration/) | Experimental DaemonSet agent and same-node Pod restore | k3s/Kubernetes + GPU |
 
 ## Project structure
 
@@ -126,7 +134,14 @@ The CLI can launch managed processes, perform CPU CRIU snapshots, coordinate CUD
 
 ## Validated scope
 
-The narrow v0.1 path is Linux x86_64, one compatible NVIDIA GPU, and same-host restore. The H100/CUDA 12.8 environment has validated native CUDA, PyTorch, FastAPI, vLLM, SGLang, Kubernetes GPU, and snapshot reporting experiments. Triton snapshot creation works; native Docker namespace restore remains open.
+The narrow v0.1 path is Linux x86_64, one compatible NVIDIA GPU, and
+same-host restore. The H100/CUDA 12.8 environment has validated native CUDA,
+PyTorch, FastAPI, vLLM, SGLang, Kubernetes GPU, and snapshot reporting
+experiments. Edo Tensei demonstrates same-host checkpoint/restore of a warmed
+vLLM process group. The Kubernetes integration is an experimental,
+same-node/container-aware prototype, not a production operator or cross-node
+migration system. Triton snapshot creation works; native Docker namespace
+restore remains open.
 
 > **Important for async vLLM:** vLLM's asynchronous scheduler uses `io_uring`
 > state that stock CRIU cannot currently restore for this workflow. Use the
